@@ -5,7 +5,7 @@ The classes in the file are all particle related
 
 import re
 from functools import partial
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import numpy as np
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -463,7 +463,10 @@ class PICMI_GriddedLayout(_PICMIModel):
                 f"You have given {kwargs['n_macroparticles_per_cell']=} and {kwargs['n_macroparticle_per_cell']=}. "
                     "Please only provide the former."
             )
-        kwargs.setdefault("n_macroparticles_per_cell", kwargs.pop("n_macroparticle_per_cell", None))
+        # Only translate the deprecated spelling if it was given, so that omitting both
+        # reports the missing required argument instead of an invalid ``None``.
+        if "n_macroparticle_per_cell" in kwargs:
+            kwargs["n_macroparticles_per_cell"] = kwargs.pop("n_macroparticle_per_cell")
         return super().__init__(*args, **kwargs)
 
     @property
@@ -471,7 +474,7 @@ class PICMI_GriddedLayout(_PICMIModel):
         return self.n_macroparticles_per_cell
 
     @n_macroparticle_per_cell.setter
-    def _(self, value):
+    def n_macroparticle_per_cell(self, value):
         self.n_macroparticles_per_cell = value
 
 
@@ -514,7 +517,7 @@ class PICMI_Species(_PICMIModel):
     - 'LLRK4': Landau-Lifschitz radiation reaction formula with RK-4)
     """
 
-    methods_list: list[str] = ["Boris", "Vay", "Higuera-Cary", "Li", "free-streaming", "LLRK4"]
+    methods_list: ClassVar[list[str]] = ["Boris", "Vay", "Higuera-Cary", "Li", "free-streaming", "LLRK4"]
 
     particle_type: str | None = Field(
         default=None,

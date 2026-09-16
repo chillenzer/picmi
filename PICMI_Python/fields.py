@@ -3,9 +3,22 @@ These should be the base classes for Python implementation of the PICMI standard
 """
 
 from typing import ClassVar, Self, Sequence, get_args, Literal
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from .base import _ClassWithInit, _PICMIModel, resolve_once
+
+
+def _fill_per_axis(per_axis_values, fallback):
+    """Combine optional per-axis values with a fallback vector of the same length.
+
+    Each axis that was not given (``None``) takes the value of ``fallback`` on that axis.
+    This is used for the particle boundaries of the grids, which default to the field
+    boundaries, including when only some of the per-axis particle values are specified.
+    """
+    return [
+        fallback_value if value is None else value
+        for value, fallback_value in zip(per_axis_values, fallback)
+    ]
 
 
 class PICMI_BinomialSmoother(_PICMIModel):
@@ -14,7 +27,7 @@ class PICMI_BinomialSmoother(_PICMIModel):
     """
 
     n_pass: Sequence[int] | None = Field(
-        default_factory=None,
+        default=None,
         description="Vector of integers. Number of passes along each axis",
     )
     compensation: Sequence[bool] | None = Field(
@@ -170,30 +183,22 @@ class PICMI_Cartesian1DGrid(_PICMIModel):
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
         if self.lower_bound_particles is None:
-            if self.xmin_particles is None:
-                self.lower_bound_particles = self.lower_bound
-            else:
-                self.lower_bound_particles = [self.xmin_particles]
+            self.lower_bound_particles = _fill_per_axis(
+                [self.xmin_particles], self.lower_bound
+            )
         if self.upper_bound_particles is None:
-            if self.xmax_particles is None:
-                self.upper_bound_particles = self.upper_bound
-            else:
-                self.upper_bound_particles = [self.xmax_particles]
+            self.upper_bound_particles = _fill_per_axis(
+                [self.xmax_particles], self.upper_bound
+            )
 
         if self.lower_boundary_conditions_particles is None:
-            if self.bc_xmin_particles is None:
-                self.lower_boundary_conditions_particles = (
-                    self.lower_boundary_conditions
-                )
-            else:
-                self.lower_boundary_conditions_particles = [self.bc_xmin_particles]
+            self.lower_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_xmin_particles], self.lower_boundary_conditions
+            )
         if self.upper_boundary_conditions_particles is None:
-            if self.bc_xmax_particles is None:
-                self.upper_boundary_conditions_particles = (
-                    self.upper_boundary_conditions
-                )
-            else:
-                self.upper_boundary_conditions_particles = [self.bc_xmax_particles]
+            self.upper_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_xmax_particles], self.upper_boundary_conditions
+            )
 
         # Sanity check on dimensionality of vector quantities
         assert len(self.number_of_cells) == 1, "Wrong number of cells specified"
@@ -351,7 +356,8 @@ class PICMI_CylindricalGrid(_PICMIModel):
     zmax_particles: float | None = Field(
         default=None, description="Position of max particle boundary along Z [m]"
     )
-    lower_boundary_conditions_particles: list[str] | None = Field(
+    # --Like bc_rmin, the radial entry may be None since the lower radial boundary will usually be the axis.
+    lower_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at lower boundaries for particles, periodic, absorbing, reflect or thermal",
     )
@@ -419,36 +425,24 @@ class PICMI_CylindricalGrid(_PICMIModel):
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
         if self.lower_bound_particles is None:
-            if (self.rmin_particles is None) and (self.zmin_particles is None):
-                self.lower_bound_particles = self.lower_bound
-            else:
-                self.lower_bound_particles = [self.rmin_particles, self.zmin_particles]
+            self.lower_bound_particles = _fill_per_axis(
+                [self.rmin_particles, self.zmin_particles], self.lower_bound
+            )
         if self.upper_bound_particles is None:
-            if (self.rmax_particles is None) and (self.zmax_particles is None):
-                self.upper_bound_particles = self.upper_bound
-            else:
-                self.upper_bound_particles = [self.rmax_particles, self.zmax_particles]
+            self.upper_bound_particles = _fill_per_axis(
+                [self.rmax_particles, self.zmax_particles], self.upper_bound
+            )
 
         if self.lower_boundary_conditions_particles is None:
-            if (self.bc_rmin_particles is None) and (self.bc_zmin_particles is None):
-                self.lower_boundary_conditions_particles = (
-                    self.lower_boundary_conditions
-                )
-            else:
-                self.lower_boundary_conditions_particles = [
-                    self.bc_rmin_particles,
-                    self.bc_zmin_particles,
-                ]
+            self.lower_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_rmin_particles, self.bc_zmin_particles],
+                self.lower_boundary_conditions,
+            )
         if self.upper_boundary_conditions_particles is None:
-            if (self.bc_rmax_particles is None) and (self.bc_zmax_particles is None):
-                self.upper_boundary_conditions_particles = (
-                    self.upper_boundary_conditions
-                )
-            else:
-                self.upper_boundary_conditions_particles = [
-                    self.bc_rmax_particles,
-                    self.bc_zmax_particles,
-                ]
+            self.upper_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_rmax_particles, self.bc_zmax_particles],
+                self.upper_boundary_conditions,
+            )
 
         # Sanity check on dimensionality of vector quantities
         assert len(self.number_of_cells) == 2, "Wrong number of cells specified"
@@ -658,36 +652,24 @@ class PICMI_Cartesian2DGrid(_PICMIModel):
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
         if self.lower_bound_particles is None:
-            if (self.xmin_particles is None) and (self.ymin_particles is None):
-                self.lower_bound_particles = self.lower_bound
-            else:
-                self.lower_bound_particles = [self.xmin_particles, self.ymin_particles]
+            self.lower_bound_particles = _fill_per_axis(
+                [self.xmin_particles, self.ymin_particles], self.lower_bound
+            )
         if self.upper_bound_particles is None:
-            if (self.xmax_particles is None) and (self.ymax_particles is None):
-                self.upper_bound_particles = self.upper_bound
-            else:
-                self.upper_bound_particles = [self.xmax_particles, self.ymax_particles]
+            self.upper_bound_particles = _fill_per_axis(
+                [self.xmax_particles, self.ymax_particles], self.upper_bound
+            )
 
         if self.lower_boundary_conditions_particles is None:
-            if (self.bc_xmin_particles is None) and (self.bc_ymin_particles is None):
-                self.lower_boundary_conditions_particles = (
-                    self.lower_boundary_conditions
-                )
-            else:
-                self.lower_boundary_conditions_particles = [
-                    self.bc_xmin_particles,
-                    self.bc_ymin_particles,
-                ]
+            self.lower_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_xmin_particles, self.bc_ymin_particles],
+                self.lower_boundary_conditions,
+            )
         if self.upper_boundary_conditions_particles is None:
-            if (self.bc_xmax_particles is None) and (self.bc_ymax_particles is None):
-                self.upper_boundary_conditions_particles = (
-                    self.upper_boundary_conditions
-                )
-            else:
-                self.upper_boundary_conditions_particles = [
-                    self.bc_xmax_particles,
-                    self.bc_ymax_particles,
-                ]
+            self.upper_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_xmax_particles, self.bc_ymax_particles],
+                self.upper_boundary_conditions,
+            )
 
         # Sanity check on dimensionality of vector quantities
         assert len(self.number_of_cells) == 2, "Wrong number of cells specified"
@@ -857,10 +839,11 @@ class PICMI_Cartesian3DGrid(_PICMIModel):
         default=None, description="Position of min particle boundary along Y [m]"
     )
     ymax_particles: float | None = Field(
-        default=None,
-        description="Position of max particle boundary along Y [m] zmin_particles float, optional Position of min particle boundary along Z [m]",
+        default=None, description="Position of max particle boundary along Y [m]"
     )
-    zmin_particles: float | None = None
+    zmin_particles: float | None = Field(
+        default=None, description="Position of min particle boundary along Z [m]"
+    )
     zmax_particles: float | None = Field(
         default=None, description="Position of max particle boundary along Z [m]"
     )
@@ -921,30 +904,19 @@ class PICMI_Cartesian3DGrid(_PICMIModel):
                 and self.ymax is not None
                 and self.zmax is not None
         ), "Either upper_bound or xmax, ymax, and zmax must be specified"
-        assert (
-            (self.lower_boundary_conditions is None)
-            and (
-                self.bc_xmin is not None
+        # Note: like for the other grids, both forms may be given (the vector is used). This
+        # validation re-runs on later assignments and when the grid is passed to another
+        # PICMI object, at which point both forms are always set.
+        assert (self.lower_boundary_conditions is not None) or (
+            self.bc_xmin is not None
                 and self.bc_ymin is not None
                 and self.bc_zmin is not None
-            )
-            or (self.lower_boundary_conditions is not None)
-            and (self.bc_xmin is None and self.bc_ymin is None and self.bc_zmin is None)
-        ), (
-            "Either lower_boundary_conditions or bc_xmin, bc_ymin, and bc_zmin must be specified"
-        )
-        assert (
-            (self.upper_boundary_conditions is None)
-            and (
-                self.bc_xmax is not None
+        ), "Either lower_boundary_conditions or bc_xmin, bc_ymin, and bc_zmin must be specified"
+        assert (self.upper_boundary_conditions is not None) or (
+            self.bc_xmax is not None
                 and self.bc_ymax is not None
                 and self.bc_zmax is not None
-            )
-            or (self.upper_boundary_conditions is not None)
-            and (self.bc_xmax is None and self.bc_ymax is None and self.bc_zmax is None)
-        ), (
-            "Either upper_boundary_conditions or bc_xmax, bc_ymax, and bc_zmax must be specified"
-        )
+        ), "Either upper_boundary_conditions or bc_xmax, bc_ymax, and bc_zmax must be specified"
 
         if self.number_of_cells is None:
             self.number_of_cells = [self.nx, self.ny, self.nz]
@@ -961,62 +933,26 @@ class PICMI_Cartesian3DGrid(_PICMIModel):
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
         if self.lower_bound_particles is None:
-            if (
-                (self.xmin_particles is None)
-                and (self.ymin_particles is None)
-                and (self.zmin_particles is None)
-            ):
-                self.lower_bound_particles = self.lower_bound
-            else:
-                self.lower_bound_particles = [
-                    self.xmin_particles,
-                    self.ymin_particles,
-                    self.zmin_particles,
-                ]
+            self.lower_bound_particles = _fill_per_axis(
+                [self.xmin_particles, self.ymin_particles, self.zmin_particles],
+                self.lower_bound,
+            )
         if self.upper_bound_particles is None:
-            if (
-                (self.xmax_particles is None)
-                and (self.ymax_particles is None)
-                and (self.zmax_particles is None)
-            ):
-                self.upper_bound_particles = self.upper_bound
-            else:
-                self.upper_bound_particles = [
-                    self.xmax_particles,
-                    self.ymax_particles,
-                    self.zmax_particles,
-                ]
+            self.upper_bound_particles = _fill_per_axis(
+                [self.xmax_particles, self.ymax_particles, self.zmax_particles],
+                self.upper_bound,
+            )
 
         if self.lower_boundary_conditions_particles is None:
-            if (
-                (self.bc_xmin_particles is None)
-                and (self.bc_ymin_particles is None)
-                and (self.bc_zmin_particles is None)
-            ):
-                self.lower_boundary_conditions_particles = (
-                    self.lower_boundary_conditions
-                )
-            else:
-                self.lower_boundary_conditions_particles = [
-                    self.bc_xmin_particles,
-                    self.bc_ymin_particles,
-                    self.bc_zmin_particles,
-                ]
+            self.lower_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_xmin_particles, self.bc_ymin_particles, self.bc_zmin_particles],
+                self.lower_boundary_conditions,
+            )
         if self.upper_boundary_conditions_particles is None:
-            if (
-                (self.bc_xmax_particles is None)
-                and (self.bc_ymax_particles is None)
-                and (self.bc_zmax_particles is None)
-            ):
-                self.upper_boundary_conditions_particles = (
-                    self.upper_boundary_conditions
-                )
-            else:
-                self.upper_boundary_conditions_particles = [
-                    self.bc_xmax_particles,
-                    self.bc_ymax_particles,
-                    self.bc_zmax_particles,
-                ]
+            self.upper_boundary_conditions_particles = _fill_per_axis(
+                [self.bc_xmax_particles, self.bc_ymax_particles, self.bc_zmax_particles],
+                self.upper_boundary_conditions,
+            )
 
         # Sanity check on number of arguments of vector quantities
         assert len(self.number_of_cells) == 3, "Wrong number of cells specified"
@@ -1080,6 +1016,10 @@ PICMI_AnyGrid = (
     | PICMI_Cartesian3DGrid
 )
 
+_ElectromagneticSolverMethod = Literal[
+    "Yee", "CKC", "Lehe", "PSTD", "PSATD", "GPSTD", "DS", "ECT"
+]
+
 
 class PICMI_ElectromagneticSolver(_PICMIModel):
     """
@@ -1098,16 +1038,12 @@ class PICMI_ElectromagneticSolver(_PICMIModel):
     - 'ECT': Enlarged Cell Technique solver, allowing internal conductors (https://doi.org/10.1109/APS.2005.1551259)
     """
 
-    @computed_field
-    def methods_list(self) -> list[str]:
-        # Retained for backwards compatibility reasons.
-        # The type annotation of `method` is the ground-truth.
-        return list(get_args(type(self).__annotations__["method"]))
+    # Retained for backwards compatibility reasons.
+    # The type annotation of `method` is the ground-truth.
+    methods_list: ClassVar[list[str]] = list(get_args(_ElectromagneticSolverMethod))
 
     grid: PICMI_AnyGrid = Field(description="Grid object for the diagnostic")
-    method: (
-        Literal["Yee", "CKC", "Lehe", "PSTD", "PSATD", "GPSTD", "DS", "ECT"] | None
-    ) = Field(
+    method: _ElectromagneticSolverMethod | None = Field(
         default=None,
         description="The advance method use to solve Maxwell's equations. The default method is code dependent.",
     )

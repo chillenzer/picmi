@@ -129,6 +129,14 @@ class _PICMIModel(BaseModel, metaclass=_DocumentedModelMetaClass):
         validate_assignment=True,
     )
 
+    # PICMI objects are mutable handles to distinct entities of a simulation: two species
+    # with identical parameters are still two species. Keep the identity-based equality and
+    # hashing of the pre-pydantic classes (pydantic's default compares by value, which makes
+    # mutable models unhashable), so that instances can be used as dictionary keys, e.g., to
+    # give per-species diagnostic options. Compare ``model_dump()`` results to compare values.
+    __eq__ = object.__eq__
+    __hash__ = object.__hash__
+
     @model_validator(mode="before")
     @classmethod
     def _ignore_other_codes_arguments(cls, data):
@@ -291,18 +299,29 @@ def broadcast_validation(values, condition, message="Condition not met."):
 
 def with_mutually_exclusive(*args, defaults=None):
     def decorator(cls):
-        class Decorated(cls):
-            @model_validator(mode='after')
-            def _mutually_exclusive(self) -> Self:
-                # make sure we don't override previously implemented behaviour:
-                try:
-                    super()._mutually_exclusive()
-                except AttributeError:
-                    pass
-                if len(non_default := {arg: value for arg, default in zip(args, repeat(None) if defaults is None else defaults) if (value:=getattr(self, arg)) != default}) > 1:
-                    raise ValueError(f"The arguments {args} are mutually exclusive. You gave: {non_default=}.")
-                return self
-        return Decorated
+        def _mutually_exclusive(self) -> Self:
+            # make sure we don't override previously implemented behaviour:
+            parent_check = getattr(super(decorated, self), "_mutually_exclusive", None)
+            if parent_check is not None:
+                parent_check()
+            if len(non_default := {arg: value for arg, default in zip(args, repeat(None) if defaults is None else defaults) if (value:=getattr(self, arg)) != default}) > 1:
+                raise ValueError(f"The arguments {args} are mutually exclusive. You gave: {non_default=}.")
+            return self
+
+        # Create the subclass under the name of the decorated class. A class statement would
+        # name it after its local variable, which then leaks into the validation error titles,
+        # the JSON schema and the documentation. The docstring is inherited through
+        # _DocumentedModelMetaClass.
+        decorated = type(cls)(
+            cls.__name__,
+            (cls,),
+            {
+                "__module__": cls.__module__,
+                "__qualname__": cls.__qualname__,
+                "_mutually_exclusive": model_validator(mode="after")(_mutually_exclusive),
+            },
+        )
+        return decorated
     return decorator
 
 class _PICMI_Extension(BaseModel):

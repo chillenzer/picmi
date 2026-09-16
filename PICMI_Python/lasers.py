@@ -5,7 +5,7 @@ import math
 import re
 from typing import Self, Sequence
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from .base import _ClassWithInit, _PICMIModel, _get_constants, resolve_once
 
@@ -13,24 +13,27 @@ from .base import _ClassWithInit, _PICMIModel, _get_constants, resolve_once
 # ---------------
 # Physics objects
 # ---------------
-def _compute_k0_E0_a0(wavelength, original_E0, original_a0):
+def _compute_E0_a0(wavelength, original_E0, original_a0):
+        """Return ``(E0, a0)``, computing the one that is ``None`` from the other one."""
         if original_E0 is None and original_a0 is None:
             raise ValueError('One of E0 or a0 must be specified')
 
         k0 = 2.*math.pi/wavelength
         constants = _get_constants()
+        # field amplitude for a0 = 1
         factor = constants.m_e * constants.c**2 * k0 / constants.q_e
 
-        E0 = original_E0 or original_a0 * factor
-        a0 = original_a0 or E0 / factor
+        # Note: compare to None explicitly, so that a zero amplitude is not treated as unset.
+        E0 = original_a0 * factor if original_E0 is None else original_E0
+        a0 = E0 / factor if original_a0 is None else original_a0
 
         # Both might have been given, so we check for consistency.
-        # The rhs value is just an arbitrary cutoff for floating point errors.
+        # The relative tolerance is just an arbitrary cutoff for floating point errors.
         # Let's presume that the user did not purposefully choose a value
         # ever so slightly off to derail us here.
-        if abs(E0/a0/ factor - 1.) > 1.e-6:
+        if not math.isclose(E0, a0 * factor, rel_tol=1.e-6):
            raise ValueError(f"You provided inconsistent {original_a0=} and {original_E0=} which resulted in {a0=} and {E0=}.")
-        return k0, E0, a0
+        return E0, a0
 
 
 
@@ -110,13 +113,58 @@ class PICMI_GaussianLaser(_PICMIModel):
         description="Optional name of the laser"
     )
     fill_in: bool = Field(default=True, description="Flags whether to fill in the empty spaced opened up when the grid moves")
-    k0: float = Field(default=0.0, exclude=True, init_var=False)
+
+    # (wavelength, a0, E0) as of the last resolution of the amplitudes, and the amplitude
+    # ("a0" or "E0") that the other one is derived from.
+    _resolved_state: tuple | None = PrivateAttr(default=None)
+    _amplitude_source: str | None = PrivateAttr(default=None)
+
+    @property
+    def k0(self) -> float:
+        """Laser wavenumber [1/m], defined as :math:`k_0 = 2\\pi/\\lambda_0` in the above formula"""
+        return 2.*math.pi/self.wavelength
 
     @model_validator(mode='after')
     @resolve_once
-    def _compute_k0_a0_e0(self) -> Self:
-        """Compute a0 and E0 from each other if needed"""
-        self.k0, self.E0, self.a0 = _compute_k0_E0_a0(self.wavelength, self.E0, self.a0)
+    def _compute_a0_e0(self) -> Self:
+        """Compute a0 and E0 from each other if needed
+
+        At construction, the amplitude that is not given is computed from the other one;
+        if both are given, they must be consistent (E0 then takes precedence later on).
+
+        The validation re-runs on every later assignment and when the laser is passed to
+        another PICMI object, at which point both amplitudes are set. To keep them
+        consistent, the amplitude that was just assigned (or otherwise, the one the other
+        was derived from) is kept and the other one is re-derived, e.g., when the wavelength
+        changes.
+        """
+        a0, E0 = self.a0, self.E0
+        source = self._amplitude_source
+        if self._resolved_state is not None:
+            if self._resolved_state == (self.wavelength, a0, E0):
+                return self
+            _, last_a0, last_E0 = self._resolved_state
+            a0_changed, E0_changed = a0 != last_a0, E0 != last_E0
+            if a0_changed and not E0_changed:
+                # a0 was assigned; if it was unset, derive it again from E0
+                source = "a0" if a0 is not None else "E0"
+            elif E0_changed and not a0_changed:
+                source = "E0" if E0 is not None else "a0"
+            elif a0_changed and E0_changed:
+                # both changed at once: treat like new input
+                source = None
+            if source == "a0":
+                E0 = None
+            elif source == "E0":
+                a0 = None
+
+        E0, a0 = _compute_E0_a0(self.wavelength, E0, a0)
+        if source is None:
+            source = "E0" if self.E0 is not None else "a0"
+
+        self.E0, self.a0 = E0, a0
+        self._amplitude_source = source
+        self._resolved_state = (self.wavelength, self.a0, self.E0)
         return self
 
 

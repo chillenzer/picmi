@@ -1,0 +1,253 @@
+"""Tests for the pydantic-based PICMI classes, using the plasmacode mock implementation.
+
+Run from the repository root with: ``python -m pytest Test/``
+"""
+import math
+
+import pytest
+from pydantic import Field, ValidationError
+
+import picmistandard
+from plasmacode import picmi
+
+
+def cartesian3d_grid_per_axis(**kw):
+    return picmi.Cartesian3DGrid(
+        nx=8, ny=8, nz=8,
+        xmin=0., xmax=1., ymin=0., ymax=1., zmin=0., zmax=1.,
+        bc_xmin="periodic", bc_xmax="periodic",
+        bc_ymin="periodic", bc_ymax="periodic",
+        bc_zmin="open", bc_zmax="open",
+        **kw,
+    )
+
+
+class ExtendedElectromagneticSolver(picmi.ElectromagneticSolver):
+    """Like a downstream code, which adds its own (annotated) fields"""
+    pml_ncell: int | None = Field(default=None, alias="plasmacode_pml_ncell")
+
+
+class ExtendedGaussianLaser(picmi.GaussianLaser):
+    laser_number: int | None = None
+
+
+def gaussian_laser(**kw):
+    return ExtendedGaussianLaser(
+        wavelength=8e-7, waist=5e-6, duration=15e-15,
+        focal_position=[0., 0., 0.], centroid_position=[0., 0., 0.],
+        propagation_direction=[0., 0., 1.], polarization_direction=[1., 0., 0.],
+        **kw,
+    )
+
+
+def e0_for_a0_1(wavelength):
+    c = picmi.constants
+    return c.m_e * c.c**2 * (2. * math.pi / wavelength) / c.q_e
+
+
+# --- ElectromagneticSolver
+
+def test_em_solver_methods_list_is_class_constant():
+    methods = ["Yee", "CKC", "Lehe", "PSTD", "PSATD", "GPSTD", "DS", "ECT"]
+    assert picmistandard.PICMI_ElectromagneticSolver.methods_list == methods
+    assert ExtendedElectromagneticSolver.methods_list == methods
+    assert "methods_list" not in picmistandard.PICMI_ElectromagneticSolver.model_fields
+
+
+def test_em_solver_subclass_repr_and_serialization():
+    solver = ExtendedElectromagneticSolver(grid=cartesian3d_grid_per_axis(), method="Yee")
+    assert "method='Yee'" in repr(solver)
+    assert "methods_list" not in solver.model_dump()
+    reloaded = ExtendedElectromagneticSolver.model_validate_json(
+        solver.model_dump_json(by_alias=True)
+    )
+    assert reloaded.method == "Yee"
+    assert reloaded.grid.number_of_cells == [8, 8, 8]
+
+
+def test_em_solver_invalid_method():
+    with pytest.raises(ValidationError):
+        picmi.ElectromagneticSolver(grid=cartesian3d_grid_per_axis(), method="Nope")
+
+
+# --- Grids
+
+def test_cartesian3d_grid_per_axis_revalidation():
+    grid = cartesian3d_grid_per_axis()
+    assert grid.lower_boundary_conditions == ["periodic", "periodic", "open"]
+    # re-validates the grid: passing it to another PICMI object, and assigning to it
+    picmi.ElectromagneticSolver(grid=grid)
+    grid.pml_cells = [4, 4, 4]
+    assert grid.pml_cells == [4, 4, 4]
+
+
+def test_cartesian3d_grid_vector_takes_precedence():
+    grid = cartesian3d_grid_per_axis(lower_boundary_conditions=["open", "open", "open"])
+    assert grid.lower_boundary_conditions == ["open", "open", "open"]
+
+
+def test_cartesian3d_grid_missing_boundary_conditions():
+    with pytest.raises(ValidationError, match="bc_xmin, bc_ymin, and bc_zmin"):
+        picmi.Cartesian3DGrid(
+            number_of_cells=[8, 8, 8], lower_bound=[0., 0., 0.], upper_bound=[1., 1., 1.],
+            upper_boundary_conditions=["open", "open", "open"],
+        )
+
+
+def test_cylindrical_grid_axis_without_boundary_condition():
+    grid = picmi.CylindricalGrid(
+        nr=8, nz=8, rmin=0., rmax=1., zmin=0., zmax=1.,
+        bc_rmax="dirichlet", bc_zmin="periodic", bc_zmax="periodic",
+    )
+    assert grid.lower_boundary_conditions == [None, "periodic"]
+    assert grid.lower_boundary_conditions_particles == [None, "periodic"]
+    picmi.ElectromagneticSolver(grid=grid)
+
+
+def test_grid_particle_boundaries_fall_back_per_axis():
+    grid = picmi.Cartesian2DGrid(
+        nx=8, ny=8, xmin=0., xmax=1., ymin=-1., ymax=1.,
+        bc_xmin="periodic", bc_xmax="periodic", bc_ymin="open", bc_ymax="open",
+        xmin_particles=0.1, bc_ymax_particles="absorbing",
+    )
+    assert grid.lower_bound_particles == [0.1, -1.]
+    assert grid.upper_bound_particles == [1., 1.]
+    assert grid.lower_boundary_conditions_particles == ["periodic", "open"]
+    assert grid.upper_boundary_conditions_particles == ["periodic", "absorbing"]
+
+    grid3d = cartesian3d_grid_per_axis(zmax_particles=0.5)
+    assert grid3d.upper_bound_particles == [1., 1., 0.5]
+
+
+def test_cartesian3d_grid_field_descriptions():
+    fields = picmistandard.PICMI_Cartesian3DGrid.model_fields
+    assert fields["ymax_particles"].description == "Position of max particle boundary along Y [m]"
+    assert fields["zmin_particles"].description == "Position of min particle boundary along Z [m]"
+
+
+# --- BinomialSmoother
+
+def test_binomial_smoother_defaults():
+    smoother = picmi.BinomialSmoother()
+    assert smoother.n_pass is None
+
+
+# --- Layouts
+
+def test_gridded_layout_deprecated_name():
+    layout = picmi.GriddedLayout(n_macroparticle_per_cell=[2, 2, 2])
+    assert layout.n_macroparticles_per_cell == [2, 2, 2]
+    layout.n_macroparticle_per_cell = [4, 4, 4]
+    assert layout.n_macroparticles_per_cell == [4, 4, 4]
+    assert layout.n_macroparticle_per_cell == [4, 4, 4]
+
+
+def test_gridded_layout_missing_argument():
+    with pytest.raises(ValidationError) as excinfo:
+        picmi.GriddedLayout()
+    assert excinfo.value.errors()[0]["type"] == "missing"
+
+
+def test_pseudo_random_layout_mutually_exclusive():
+    assert picmistandard.PICMI_PseudoRandomLayout.__name__ == "PICMI_PseudoRandomLayout"
+    assert picmistandard.PICMI_PseudoRandomLayout.__qualname__ == "PICMI_PseudoRandomLayout"
+    assert picmistandard.PICMI_PseudoRandomLayout.model_json_schema()["title"] == "PICMI_PseudoRandomLayout"
+    assert "pseudo-random" in picmistandard.PICMI_PseudoRandomLayout.__doc__
+    picmi.PseudoRandomLayout(n_macroparticles_per_cell=2)
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        picmi.PseudoRandomLayout(n_macroparticles=10, n_macroparticles_per_cell=2)
+
+
+def test_mutually_exclusive_chains_parent_checks():
+    @picmistandard.base.with_mutually_exclusive("c", "d")
+    class Twice(picmi.PseudoRandomLayout):
+        c: int | None = None
+        d: int | None = None
+
+    assert Twice.__name__ == "Twice"
+    Twice(n_macroparticles=10, c=1)
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        Twice(n_macroparticles=10, n_macroparticles_per_cell=2)
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        Twice(c=1, d=2)
+
+
+# --- Species
+
+def test_species_methods_list_is_class_constant():
+    assert "methods_list" not in picmistandard.PICMI_Species.model_fields
+    assert "Boris" in picmi.Species.methods_list
+    assert "methods_list" not in picmi.Species(particle_type="electron").model_dump()
+
+
+def test_species_identity_semantics():
+    electrons = picmi.Species(particle_type="electron", name="e")
+    twin = picmi.Species(particle_type="electron", name="e")
+    assert electrons == electrons
+    assert electrons != twin
+    # usable as dictionary keys, e.g., for per-species diagnostic options
+    random_fraction = {electrons: 0.5, twin: 0.25}
+    assert random_fraction[electrons] == 0.5
+    assert random_fraction[twin] == 0.25
+    assert electrons.model_dump() == twin.model_dump()
+
+
+# --- GaussianLaser
+
+def test_gaussian_laser_amplitudes_at_construction():
+    laser = gaussian_laser(a0=2.)
+    assert laser.E0 == pytest.approx(2. * e0_for_a0_1(8e-7))
+    assert laser.k0 == pytest.approx(2. * math.pi / 8e-7)
+
+    laser = gaussian_laser(E0=e0_for_a0_1(8e-7))
+    assert laser.a0 == pytest.approx(1.)
+
+    laser = gaussian_laser(a0=0.)
+    assert laser.E0 == 0.
+
+    gaussian_laser(a0=1., E0=e0_for_a0_1(8e-7))
+    with pytest.raises(ValidationError, match="inconsistent"):
+        gaussian_laser(a0=1., E0=2. * e0_for_a0_1(8e-7))
+    with pytest.raises(ValidationError, match="One of E0 or a0"):
+        gaussian_laser()
+    with pytest.raises(ValidationError, match="k0"):
+        gaussian_laser(a0=1., k0=1.)
+
+
+def test_gaussian_laser_reassignment_keeps_amplitudes_consistent():
+    laser = gaussian_laser(a0=1.)
+    # unrelated assignments and nesting leave the amplitudes untouched
+    E0 = laser.E0
+    laser.laser_number = 1
+    laser.name = "laser1"
+    assert (laser.a0, laser.E0) == (1., E0)
+
+    # a0 was given: it is kept, and E0 is re-derived for the new wavelength
+    laser.wavelength = 1e-6
+    assert laser.a0 == 1.
+    assert laser.E0 == pytest.approx(e0_for_a0_1(1e-6))
+    assert laser.k0 == pytest.approx(2. * math.pi / 1e-6)
+
+    laser.a0 = 3.
+    assert laser.E0 == pytest.approx(3. * e0_for_a0_1(1e-6))
+
+    # an assigned E0 is kept from now on
+    laser.E0 = e0_for_a0_1(1e-6)
+    assert laser.a0 == pytest.approx(1.)
+    laser.wavelength = 8e-7
+    assert laser.E0 == pytest.approx(e0_for_a0_1(1e-6))
+    assert laser.a0 == pytest.approx(e0_for_a0_1(1e-6) / e0_for_a0_1(8e-7))
+
+    # unsetting one amplitude derives it again from the other one
+    laser.a0 = None
+    assert laser.a0 == pytest.approx(e0_for_a0_1(1e-6) / e0_for_a0_1(8e-7))
+
+
+def test_gaussian_laser_json_round_trip():
+    laser = gaussian_laser(a0=1.)
+    reloaded = ExtendedGaussianLaser.model_validate_json(laser.model_dump_json())
+    assert reloaded.model_dump() == laser.model_dump()
+    # the serialized form contains both amplitudes, so E0 takes precedence after reloading
+    reloaded.wavelength = 1e-6
+    assert reloaded.E0 == laser.E0
+    assert reloaded.a0 == pytest.approx(e0_for_a0_1(8e-7) / e0_for_a0_1(1e-6))
