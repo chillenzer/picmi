@@ -2,7 +2,7 @@
 These should be the base classes for Python implementation of the PICMI standard
 """
 import math
-from typing import ClassVar, Self, Sequence
+from typing import ClassVar, Self
 
 from pydantic import Field, PrivateAttr, model_validator
 
@@ -144,16 +144,16 @@ class PICMI_GaussianLaser(_PICMILaser):
         gt=0.,
         description="Duration of the Gaussian pulse [s], defined as :math:`\\tau` in the above formula"
     )
-    propagation_direction: Sequence[float] = Field(
+    propagation_direction: list[float] = Field(
         description="Unit vector of length 3. Direction of propagation [1]"
     )
-    polarization_direction: Sequence[float] = Field(
+    polarization_direction: list[float] = Field(
         description="Unit vector of length 3. Direction of polarization [1]"
     )
-    focal_position: Sequence[float] = Field(
+    focal_position: list[float] = Field(
         description="Vector of length 3 of floats. Position of the laser focus [m]"
     )
-    centroid_position: Sequence[float] = Field(
+    centroid_position: list[float] = Field(
         description="Vector of length 3 of floats. Position of the laser centroid at time 0 [m]"
     )
     a0: float | None = Field(
@@ -205,10 +205,10 @@ class PICMI_AnalyticLaser(_PICMILaser, PICMI_ExpressionParameters):
         gt=0.,
         description="Laser wavelength. This should be built into the expression, but some codes require a specified value for numerical purposes."
     )
-    propagation_direction: Sequence[float] = Field(
+    propagation_direction: list[float] = Field(
         description="Unit vector of length 3. Direction of propagation [1]"
     )
-    polarization_direction: Sequence[float] = Field(
+    polarization_direction: list[float] = Field(
         description="Unit vector of length 3. Direction of polarization [1]"
     )
     amax: float | None = Field(
@@ -245,10 +245,10 @@ class PICMI_LaserAntenna(_PICMIModel):
     """
     Specifies the laser antenna injection method
     """
-    position: Sequence[float] = Field(
+    position: list[float] = Field(
         description="Vector of length 3. Position of antenna launching the laser [m]"
     )
-    normal_vector: Sequence[float] | None = Field(
+    normal_vector: list[float] | None = Field(
         default=None,
         description="Vector of length 3. Vector normal to antenna plane, defaults to the laser direction of propagation [1]"
     )

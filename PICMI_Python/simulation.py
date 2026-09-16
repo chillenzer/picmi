@@ -1,7 +1,7 @@
 """Simulation class following the PICMI standard
 This should be the base classes for Python implementation of the PICMI standard
 """
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -70,11 +70,11 @@ class PICMI_Simulation(_PICMIModel):
         default_factory=list,
         description="Whether the initial space-charge fields of each species are calculated"
     )
-    injection_plane_positions: list[float | Sequence[float] | None] = Field(
+    injection_plane_positions: list[float | list[float] | None] = Field(
         default_factory=list,
         description="Position of one point of the injection plane of each species"
     )
-    injection_plane_normal_vectors: list[Sequence[float] | None] = Field(
+    injection_plane_normal_vectors: list[list[float] | None] = Field(
         default_factory=list,
         description="Vector normal to the injection plane of each species"
     )

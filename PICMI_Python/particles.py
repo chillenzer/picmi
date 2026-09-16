@@ -423,7 +423,7 @@ class PICMI_GriddedLayout(_PICMIModel):
         self.n_macroparticles_per_cell = value
 
 
-@with_mutually_exclusive("n_macroparticles_per_cell", "n_macroparticles")
+@with_mutually_exclusive("n_macroparticles_per_cell", "n_macroparticles", required=True)
 class PICMI_PseudoRandomLayout(_PICMIModel):
     """
     Specifies a pseudo-random layout of the particles

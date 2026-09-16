@@ -3,8 +3,6 @@ These should be the base classes for Python implementation of the PICMI standard
 The classes in the file are all diagnostics related
 """
 
-from typing import Sequence
-
 from pydantic import Field
 
 from .base import PICMI_DiagnosticExtension, _PICMIModel
@@ -42,15 +40,15 @@ class PICMI_FieldDiagnostic(_PICMIModel):
         default=None,
         description="Maximum step at which diagnostics could be written (default unbounded)"
     )
-    number_of_cells: Sequence[int] | None = Field(
+    number_of_cells: list[int] | None = Field(
         default=None,
         description="Number of cells in each dimension. If not given, will be obtained from grid."
     )
-    lower_bound: Sequence[float] | None = Field(
+    lower_bound: list[float] | None = Field(
         default=None,
         description="Lower corner of diagnostics box in each direction. If not given, will be obtained from grid."
     )
-    upper_bound: Sequence[float] | None = Field(
+    upper_bound: list[float] | None = Field(
         default=None,
         description="Higher corner of diagnostics box in each direction. If not given, will be obtained from grid."
     )
@@ -90,15 +88,15 @@ class PICMI_ElectrostaticFieldDiagnostic(_PICMIModel):
         default=None,
         description="Maximum step at which diagnostics could be written (default unbounded)"
     )
-    number_of_cells: Sequence[int] | None = Field(
+    number_of_cells: list[int] | None = Field(
         default=None,
         description="Number of cells in each dimension. If not given, will be obtained from grid."
     )
-    lower_bound: Sequence[float] | None = Field(
+    lower_bound: list[float] | None = Field(
         default=None,
         description="Lower corner of diagnostics box in each direction. If not given, will be obtained from grid."
     )
-    upper_bound: Sequence[float] | None = Field(
+    upper_bound: list[float] | None = Field(
         default=None,
         description="Higher corner of diagnostics box in each direction. If not given, will be obtained from grid."
     )

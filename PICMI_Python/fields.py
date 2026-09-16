@@ -2,7 +2,7 @@
 These should be the base classes for Python implementation of the PICMI standard
 """
 
-from typing import ClassVar, Literal, NamedTuple, Self, Sequence, get_args
+from typing import ClassVar, Literal, NamedTuple, Self, get_args
 from pydantic import Field, PrivateAttr, model_validator
 
 from .base import _PICMIModel, PICMI_SolverExtension, resolve_once
@@ -143,17 +143,17 @@ class PICMI_BinomialSmoother(_PICMIModel):
     Describes a binomial smoother operator (applied to grids).
     """
 
-    n_pass: Sequence[int] | None = Field(
+    n_pass: list[int] | None = Field(
         default=None,
         description="Vector of integers. Number of passes along each axis",
     )
-    compensation: Sequence[bool] | None = Field(
+    compensation: list[bool] | None = Field(
         default=None, description="Flags whether to apply compensation along each axis"
     )
-    stride: Sequence[int] | None = Field(
+    stride: list[int] | None = Field(
         default=None, description="Stride along each axis"
     )
-    alpha: Sequence[float] | None = Field(
+    alpha: list[float] | None = Field(
         default=None, description="Smoothing coefficients along each axis"
     )
 
@@ -1064,7 +1064,7 @@ class PICMI_ElectromagneticSolver(_PICMIModel):
         default=None,
         description="The advance method use to solve Maxwell's equations. The default method is code dependent.",
     )
-    stencil_order: Sequence[int] | None = Field(
+    stencil_order: list[int] | None = Field(
         default=None, description="Order of stencil for each axis (-1=infinite)"
     )
     cfl: float | None = Field(
@@ -1079,7 +1079,7 @@ class PICMI_ElectromagneticSolver(_PICMIModel):
     subcycling: int | None = Field(
         default=None, description="Level of subcycling for the GPSTD solver"
     )
-    galilean_velocity: Sequence[float] | None = Field(
+    galilean_velocity: list[float] | None = Field(
         default=None, description="Velocity of Galilean reference frame [m/s]"
     )
     divE_cleaning: bool | None = Field(

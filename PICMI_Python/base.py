@@ -2,6 +2,7 @@
 """
 import contextlib
 import functools
+import numbers
 import re
 import threading
 from itertools import repeat
@@ -345,7 +346,8 @@ class _PICMIModel(BaseModel, metaclass=_DocumentedModelMetaClass):
 
 def _as_expression(value):
     """Expressions are stored as strings without line breaks; numbers are accepted, too."""
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    # numbers.Real includes NumPy scalars, e.g., numpy.float32, which are no Python floats
+    if isinstance(value, numbers.Real) and not isinstance(value, bool):
         value = f'{value}'
     if isinstance(value, str):
         value = value.replace('\n', '')
@@ -522,7 +524,11 @@ def broadcast_validation(values, condition, message="Condition not met."):
     return values
 
 
-def with_mutually_exclusive(*args, defaults=None):
+def with_mutually_exclusive(*args, defaults=None, required=False):
+    """Class decorator: at most one of the arguments differs from its default (None by default)
+
+    With ``required=True``, exactly one of the arguments must be given.
+    """
     def decorator(cls):
         def _mutually_exclusive(self) -> Self:
             # make sure we don't override previously implemented behaviour:
@@ -531,6 +537,8 @@ def with_mutually_exclusive(*args, defaults=None):
                 parent_check()
             if len(non_default := {arg: value for arg, default in zip(args, repeat(None) if defaults is None else defaults) if (value:=getattr(self, arg)) != default}) > 1:
                 raise ValueError(f"The arguments {args} are mutually exclusive. You gave: {non_default=}.")
+            if required and not non_default:
+                raise ValueError(f"One of the arguments {args} must be given.")
             return self
 
         # Create the subclass under the name of the decorated class. A class statement would

@@ -4,6 +4,7 @@ Run from the repository root with: ``python -m pytest Test/``
 """
 import math
 
+import numpy as np
 import pytest
 from pydantic import Field, ValidationError
 
@@ -232,6 +233,45 @@ def test_binomial_smoother_defaults():
     assert smoother.n_pass is None
 
 
+# --- NumPy inputs
+
+def test_vector_parameters_accept_numpy_arrays():
+    laser = gaussian_laser(a0=1.)
+    laser.focal_position = np.array([0., 0., 1e-5])
+    assert laser.focal_position == [0., 0., 1e-5]
+    antenna = picmi.LaserAntenna(position=np.zeros(3), normal_vector=np.array([0., 0., 1.]))
+    assert antenna.position == [0., 0., 0.] and antenna.normal_vector == [0., 0., 1.]
+
+    grid = cartesian3d_grid_vectors()
+    solver = picmi.ElectromagneticSolver(
+        grid=grid, stencil_order=np.array([2, 2, 2]), galilean_velocity=np.zeros(3),
+        source_smoother=picmi.BinomialSmoother(n_pass=np.ones(3, dtype=int)),
+    )
+    assert solver.stencil_order == [2, 2, 2] and solver.galilean_velocity == [0., 0., 0.]
+    assert solver.source_smoother.n_pass == [1, 1, 1]
+    diagnostic = picmi.FieldDiagnostic(
+        grid=grid, period=1, number_of_cells=np.array([4, 4, 4]), lower_bound=np.zeros(3), upper_bound=np.ones(3),
+    )
+    assert diagnostic.number_of_cells == [4, 4, 4] and diagnostic.upper_bound == [1., 1., 1.]
+
+    sim = picmi.Simulation(solver=solver)
+    sim.add_species_through_plane(
+        picmi.Species(particle_type="electron", name="electrons"), layout=None,
+        injection_plane_position=np.zeros(3), injection_plane_normal_vector=np.array([0., 0., 1.]),
+    )
+    assert sim.injection_plane_positions == [[0., 0., 0.]]
+    assert sim.injection_plane_normal_vectors == [[0., 0., 1.]]
+    assert picmi.Simulation.model_validate_json(sim.model_dump_json()).injection_plane_normal_vectors == [[0., 0., 1.]]
+
+
+def test_expressions_accept_numpy_numbers():
+    assert picmi.AnalyticDistribution(density_expression=np.int64(5)).density_expression == "5"
+    assert picmi.AnalyticDistribution(density_expression=np.float32(0.5)).density_expression == "0.5"
+    assert picmi.AnalyticDistribution(density_expression=np.float64(2.5)).density_expression == "2.5"
+    with pytest.raises(ValidationError):
+        picmi.AnalyticDistribution(density_expression=np.bool_(True))
+
+
 # --- Layouts
 
 def test_gridded_layout_deprecated_name():
@@ -248,14 +288,20 @@ def test_gridded_layout_missing_argument():
     assert excinfo.value.errors()[0]["type"] == "missing"
 
 
-def test_pseudo_random_layout_mutually_exclusive():
+def test_pseudo_random_layout_requires_one_number_of_macroparticles():
     assert picmistandard.PICMI_PseudoRandomLayout.__name__ == "PICMI_PseudoRandomLayout"
     assert picmistandard.PICMI_PseudoRandomLayout.__qualname__ == "PICMI_PseudoRandomLayout"
     assert picmistandard.PICMI_PseudoRandomLayout.model_json_schema()["title"] == "PICMI_PseudoRandomLayout"
     assert "pseudo-random" in picmistandard.PICMI_PseudoRandomLayout.__doc__
-    picmi.PseudoRandomLayout(n_macroparticles_per_cell=2)
+    layout = picmi.PseudoRandomLayout(n_macroparticles_per_cell=2)
+    picmi.PseudoRandomLayout(n_macroparticles=10)
     with pytest.raises(ValidationError, match="mutually exclusive"):
         picmi.PseudoRandomLayout(n_macroparticles=10, n_macroparticles_per_cell=2)
+    with pytest.raises(ValidationError, match="must be given"):
+        picmi.PseudoRandomLayout()
+    with pytest.raises(ValidationError, match="must be given"):
+        layout.n_macroparticles_per_cell = None
+    assert layout.n_macroparticles_per_cell == 2
 
 
 def test_mutually_exclusive_chains_parent_checks():
@@ -269,7 +315,9 @@ def test_mutually_exclusive_chains_parent_checks():
     with pytest.raises(ValidationError, match="mutually exclusive"):
         Twice(n_macroparticles=10, n_macroparticles_per_cell=2)
     with pytest.raises(ValidationError, match="mutually exclusive"):
-        Twice(c=1, d=2)
+        Twice(n_macroparticles=10, c=1, d=2)
+    with pytest.raises(ValidationError, match="must be given"):
+        Twice(c=1)
 
 
 # --- Species
