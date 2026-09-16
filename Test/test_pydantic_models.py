@@ -22,6 +22,23 @@ def cartesian3d_grid_per_axis(**kw):
     )
 
 
+def cartesian3d_grid_vectors(**kw):
+    return picmi.Cartesian3DGrid(
+        number_of_cells=[8, 8, 8], lower_bound=[0., 0., 0.], upper_bound=[1., 1., 1.],
+        lower_boundary_conditions=["open", "open", "open"],
+        upper_boundary_conditions=["open", "open", "open"],
+        **kw,
+    )
+
+
+class ExtendedCartesian3DGrid(picmi.Cartesian3DGrid):
+    max_grid_size: int = Field(default=32, alias="plasmacode_max_grid_size")
+
+
+class ExtendedUniformDistribution(picmi.UniformDistribution):
+    density_max: float | None = None
+
+
 class ExtendedElectromagneticSolver(picmi.ElectromagneticSolver):
     """Like a downstream code, which adds its own (annotated) fields"""
     pml_ncell: int | None = Field(default=None, alias="plasmacode_pml_ncell")
@@ -117,6 +134,89 @@ def test_grid_particle_boundaries_fall_back_per_axis():
 
     grid3d = cartesian3d_grid_per_axis(zmax_particles=0.5)
     assert grid3d.upper_bound_particles == [1., 1., 0.5]
+
+
+def test_grid_per_axis_and_vector_forms_stay_in_sync():
+    grid = cartesian3d_grid_vectors()
+    assert (grid.nx, grid.ny, grid.nz) == (8, 8, 8)
+    assert (grid.xmin, grid.bc_zmax) == (0., "open")
+
+    grid.nx = 64
+    assert grid.number_of_cells == [64, 8, 8]
+
+    grid.number_of_cells = [16, 16, 32]
+    assert (grid.nx, grid.ny, grid.nz) == (16, 16, 32)
+
+    grid.bc_ymin = "periodic"
+    assert grid.lower_boundary_conditions == ["open", "periodic", "open"]
+
+    # unsetting restores the current value
+    grid.nx = None
+    assert grid.nx == 16
+    grid.number_of_cells = None
+    assert grid.number_of_cells == [16, 16, 32]
+
+    # passing the grid to another object does not change it
+    picmi.ElectromagneticSolver(grid=grid)
+    assert grid.number_of_cells == [16, 16, 32]
+
+
+def test_grid_particle_boundaries_follow_field_boundaries():
+    grid = cartesian3d_grid_vectors(zmax_particles=0.5)
+    assert grid.upper_bound_particles == [1., 1., 0.5]
+    assert grid.xmax_particles == 1.
+
+    # particle boundaries that were not specified follow the field boundaries
+    grid.xmax = 2.
+    assert grid.upper_bound == [2., 1., 1.]
+    assert grid.upper_bound_particles == [2., 1., 0.5]
+    assert grid.xmax_particles == 2.
+    grid.upper_bound = [3., 3., 3.]
+    assert grid.upper_bound_particles == [3., 3., 0.5]
+
+    # unsetting a particle boundary returns to the default
+    grid.zmax_particles = None
+    assert grid.upper_bound_particles == [3., 3., 3.]
+
+    # specified particle boundaries do not follow the field boundaries anymore
+    grid.upper_bound_particles = [0.5, 0.5, 0.5]
+    grid.xmax = 9.
+    assert grid.upper_bound_particles == [0.5, 0.5, 0.5]
+    grid.upper_bound_particles = None
+    assert grid.upper_bound_particles == [9., 3., 3.]
+
+    grid.bc_zmin = "periodic"
+    assert grid.lower_boundary_conditions_particles == ["open", "open", "periodic"]
+
+
+def test_cylindrical_grid_axis_boundary_condition_assignment():
+    grid = picmi.CylindricalGrid(
+        nr=8, nz=8, rmin=0., rmax=1., zmin=0., zmax=1.,
+        bc_rmax="dirichlet", bc_zmin="periodic", bc_zmax="periodic",
+    )
+    grid.bc_rmin = "dirichlet"
+    assert grid.lower_boundary_conditions == ["dirichlet", "periodic"]
+    assert grid.lower_boundary_conditions_particles == ["dirichlet", "periodic"]
+    # on the axis, None is a valid boundary condition
+    grid.bc_rmin = None
+    assert grid.lower_boundary_conditions == [None, "periodic"]
+    assert grid.lower_boundary_conditions_particles == [None, "periodic"]
+
+
+def test_failed_assignment_leaves_object_unchanged():
+    grid = cartesian3d_grid_vectors()
+    with pytest.raises(ValidationError, match="Wrong number of cells"):
+        grid.number_of_cells = [4, 4]
+    assert grid.number_of_cells == [8, 8, 8]
+    assert grid.nx == 8
+    grid.ny = 7
+    assert grid.number_of_cells == [8, 7, 8]
+
+    layout = picmi.PseudoRandomLayout(n_macroparticles=10)
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        layout.n_macroparticles_per_cell = 2
+    assert layout.n_macroparticles_per_cell is None
+    assert "n_macroparticles_per_cell" not in layout.model_fields_set
 
 
 def test_cartesian3d_grid_field_descriptions():
@@ -251,3 +351,85 @@ def test_gaussian_laser_json_round_trip():
     reloaded.wavelength = 1e-6
     assert reloaded.E0 == laser.E0
     assert reloaded.a0 == pytest.approx(e0_for_a0_1(8e-7) / e0_for_a0_1(1e-6))
+
+
+# --- Serialization
+
+def extended_simulation():
+    grid = ExtendedCartesian3DGrid(
+        number_of_cells=[8, 8, 8], lower_bound=[0., 0., 0.], upper_bound=[1., 1., 1.],
+        lower_boundary_conditions=["periodic"] * 3, upper_boundary_conditions=["periodic"] * 3,
+        plasmacode_max_grid_size=16,
+    )
+    solver = ExtendedElectromagneticSolver(
+        grid=grid, method="Yee", plasmacode_pml_ncell=12,
+        source_smoother=picmi.BinomialSmoother(n_pass=[1, 1, 1]),
+    )
+    electrons = picmi.Species(
+        particle_type="electron", name="electrons",
+        initial_distribution=[
+            ExtendedUniformDistribution(density=1e23, density_max=2e23),
+            picmi.AnalyticDistribution(density_expression="n0", n0=1e24),
+        ],
+    )
+    sim = picmi.Simulation(solver=solver, max_steps=10)
+    sim.add_species(electrons, layout=picmi.GriddedLayout(n_macroparticles_per_cell=[2, 2, 2], grid=grid))
+    sim.add_diagnostic(picmi.ParticleDiagnostic(period=5, species=[electrons]))
+    return sim
+
+
+def test_dump_records_the_class_of_nested_objects():
+    sim = extended_simulation()
+    data = sim.model_dump(by_alias=True)
+    assert data[picmistandard.base.PICMI_CLASS_KEY] == "plasmacode.picmi.Simulation"
+    solver = data["solver"]
+    assert solver[picmistandard.base.PICMI_CLASS_KEY].endswith(".ExtendedElectromagneticSolver")
+    # the fields of the actual (downstream) class are serialized, not those of the annotated class
+    assert solver["grid"]["plasmacode_max_grid_size"] == 16
+    assert data["species"][0]["initial_distribution"][0]["density_max"] == 2e23
+    # the class marker is not a parameter
+    assert picmistandard.base.PICMI_CLASS_KEY not in picmi.Simulation.model_json_schema()["properties"]
+
+
+def test_load_restores_the_classes_of_nested_objects():
+    sim = extended_simulation()
+    loaded = picmi.Simulation.model_validate_json(sim.model_dump_json(by_alias=True))
+
+    assert type(loaded) is picmi.Simulation
+    # in a field typed as Any
+    assert type(loaded.solver) is ExtendedElectromagneticSolver
+    assert loaded.solver.pml_ncell == 12
+    # in a field typed as a union of standard classes
+    assert type(loaded.solver.grid) is ExtendedCartesian3DGrid
+    assert loaded.solver.grid.max_grid_size == 16
+    assert type(loaded.solver.source_smoother) is picmi.BinomialSmoother
+    # in lists
+    assert type(loaded.species[0]) is picmi.Species
+    assert [type(d) for d in loaded.species[0].initial_distribution] == [
+        ExtendedUniformDistribution, picmi.AnalyticDistribution
+    ]
+    assert loaded.species[0].initial_distribution[1].user_defined_kw == {"n0": 1e24}
+    assert type(loaded.layouts[0].grid) is ExtendedCartesian3DGrid
+    assert type(loaded.diagnostics[0].species[0]) is picmi.Species
+
+    assert loaded.model_dump_json(by_alias=True) == sim.model_dump_json(by_alias=True)
+
+
+def test_load_checks_the_recorded_class():
+    grid = cartesian3d_grid_vectors()
+    with pytest.raises(ValidationError, match="cannot be loaded as"):
+        picmi.CylindricalGrid.model_validate(grid.model_dump())
+
+    data = extended_simulation().model_dump()
+    data["solver"][picmistandard.base.PICMI_CLASS_KEY] = "unknown.module.Solver"
+    with pytest.raises(ValidationError, match="Unknown picmi_class 'unknown.module.Solver'"):
+        picmi.Simulation.model_validate(data)
+
+    # data of a standard class can be loaded as a class derived from it
+    standard_grid = picmistandard.PICMI_Cartesian3DGrid(
+        number_of_cells=[8, 8, 8], lower_bound=[0., 0., 0.], upper_bound=[1., 1., 1.],
+        lower_boundary_conditions=["open"] * 3, upper_boundary_conditions=["open"] * 3,
+    )
+    loaded = ExtendedCartesian3DGrid.model_validate(standard_grid.model_dump())
+    assert type(loaded) is ExtendedCartesian3DGrid
+    assert loaded.number_of_cells == [8, 8, 8]

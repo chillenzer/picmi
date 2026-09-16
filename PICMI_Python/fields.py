@@ -2,23 +2,140 @@
 These should be the base classes for Python implementation of the PICMI standard
 """
 
-from typing import ClassVar, Self, Sequence, get_args, Literal
-from pydantic import BaseModel, Field, model_validator
+from typing import ClassVar, Literal, NamedTuple, Self, Sequence, get_args
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from .base import _ClassWithInit, _PICMIModel, resolve_once
 
 
-def _fill_per_axis(per_axis_values, fallback):
-    """Combine optional per-axis values with a fallback vector of the same length.
+class _AxisGroup(NamedTuple):
+    """A vector parameter of a grid and its per-axis forms, e.g., number_of_cells and nx, ny, nz"""
 
-    Each axis that was not given (``None``) takes the value of ``fallback`` on that axis.
-    This is used for the particle boundaries of the grids, which default to the field
-    boundaries, including when only some of the per-axis particle values are specified.
-    """
-    return [
-        fallback_value if value is None else value
-        for value, fallback_value in zip(per_axis_values, fallback)
-    ]
+    vector: str
+    per_axis: tuple[str, ...]
+    # the vector that the axes, which are not specified, default to
+    default: str | None = None
+    # whether None is a valid value of an axis (e.g., the boundary condition on the axis in RZ)
+    none_is_value: bool = False
+
+
+class _AxisGroupState(NamedTuple):
+    values: list
+    per_axis: list
+    defaulted_axes: frozenset
+
+
+class _PICMIGrid(_PICMIModel):
+    # Base of the grids (without docstring, so that it is not prepended to the grids' ones).
+    #
+    # Grid parameters can be specified as vectors (e.g., number_of_cells) or per axis (e.g.,
+    # nx, ny, nz). Both forms are kept in sync: at construction, the vector is used if both are
+    # given. Afterwards, assigning to either form updates the other one, and assigning None
+    # restores the current value (or for the particle boundaries, returns to the default).
+    # Particle boundaries that are not specified default to the field boundaries, and follow
+    # them when those change later on.
+
+    # The vector parameters with their per-axis forms, defined by each grid. Groups with a
+    # default are listed after the group of their default vector.
+    _axis_groups: ClassVar[tuple[_AxisGroup, ...]] = ()
+
+    # Per vector parameter: the state as of the last validation (None before the first one).
+    _axis_state: dict[str, _AxisGroupState] | None = PrivateAttr(default=None)
+
+    def _resolve_axis_groups(self):
+        """Resolve and synchronize the vector and per-axis forms of all grid parameters.
+
+        Validation re-runs on every assignment and when the grid is passed to another PICMI
+        object, so this compares against the state of the last validation to find out which
+        form was assigned.
+        """
+        new_state = {}
+        for group in self._axis_groups:
+            vector = getattr(self, group.vector)
+            per_axis = [getattr(self, name) for name in group.per_axis]
+            previous = None if self._axis_state is None else self._axis_state[group.vector]
+
+            if previous is None:
+                # initial input: the vector is used if given
+                if vector is not None:
+                    values, defaulted_axes = list(vector), set()
+                else:
+                    values = per_axis
+                    defaulted_axes = set()
+                    if group.default is not None:
+                        defaulted_axes = {axis for axis, value in enumerate(values) if value is None}
+            elif vector != previous.values:
+                if vector is not None:
+                    values, defaulted_axes = list(vector), set()
+                elif group.default is not None:
+                    values, defaulted_axes = list(previous.values), set(range(len(previous.values)))
+                else:
+                    values, defaulted_axes = list(previous.values), set(previous.defaulted_axes)
+            else:
+                values, defaulted_axes = list(previous.values), set(previous.defaulted_axes)
+                for axis, (value, previous_value) in enumerate(zip(per_axis, previous.per_axis)):
+                    if value == previous_value:
+                        continue
+                    if value is not None or group.none_is_value:
+                        values[axis] = value
+                        defaulted_axes.discard(axis)
+                    elif group.default is not None:
+                        defaulted_axes.add(axis)
+
+            if defaulted_axes:
+                default = getattr(self, group.default)
+                for axis in defaulted_axes:
+                    if axis < len(values) and default is not None and axis < len(default):
+                        values[axis] = default[axis]
+
+            if vector != values:
+                setattr(self, group.vector, values)
+            # a vector of the wrong length is reported by the dimensionality checks of the grid
+            if len(values) == len(group.per_axis):
+                for name, value in zip(group.per_axis, values):
+                    if getattr(self, name) != value:
+                        setattr(self, name, value)
+            new_state[group.vector] = _AxisGroupState(
+                list(getattr(self, group.vector)),
+                [getattr(self, name) for name in group.per_axis],
+                frozenset(defaulted_axes),
+            )
+        self._axis_state = new_state
+
+
+def _grid_axis_groups(axes, lower_boundary_condition_can_be_none=False):
+    """The axis groups of a grid with the given axis names, e.g., ("x", "y", "z")"""
+    return (
+        _AxisGroup("number_of_cells", tuple(f"n{axis}" for axis in axes)),
+        _AxisGroup("lower_bound", tuple(f"{axis}min" for axis in axes)),
+        _AxisGroup("upper_bound", tuple(f"{axis}max" for axis in axes)),
+        _AxisGroup(
+            "lower_boundary_conditions",
+            tuple(f"bc_{axis}min" for axis in axes),
+            none_is_value=lower_boundary_condition_can_be_none,
+        ),
+        _AxisGroup("upper_boundary_conditions", tuple(f"bc_{axis}max" for axis in axes)),
+        _AxisGroup(
+            "lower_bound_particles",
+            tuple(f"{axis}min_particles" for axis in axes),
+            default="lower_bound",
+        ),
+        _AxisGroup(
+            "upper_bound_particles",
+            tuple(f"{axis}max_particles" for axis in axes),
+            default="upper_bound",
+        ),
+        _AxisGroup(
+            "lower_boundary_conditions_particles",
+            tuple(f"bc_{axis}min_particles" for axis in axes),
+            default="lower_boundary_conditions",
+        ),
+        _AxisGroup(
+            "upper_boundary_conditions_particles",
+            tuple(f"bc_{axis}max_particles" for axis in axes),
+            default="upper_boundary_conditions",
+        ),
+    )
 
 
 class PICMI_BinomialSmoother(_PICMIModel):
@@ -41,7 +158,7 @@ class PICMI_BinomialSmoother(_PICMIModel):
     )
 
 
-class PICMI_Cartesian1DGrid(_PICMIModel):
+class PICMI_Cartesian1DGrid(_PICMIGrid):
     """
     One-dimensional Cartesian grid
     Parameters can be specified either as vectors or separately.
@@ -63,10 +180,11 @@ class PICMI_Cartesian1DGrid(_PICMIModel):
 
     # Note for implementations, as a matter of convenience and flexibility, the user interface allows
     # specifying various quantities using either the individual named attributes (such as nx) or a
-    # vector of values (such as number_of_cells). However, internally, only the vectors are saved and
-    # the implementation needs to use the those to access the user input.
+    # vector of values (such as number_of_cells). Both forms are kept in sync (see _PICMIGrid), but the
+    # implementation should use the vectors to access the user input.
 
     number_of_dimensions: ClassVar[int] = 1
+    _axis_groups: ClassVar[tuple[_AxisGroup, ...]] = _grid_axis_groups(("x",))
 
     # Vector forms (the internally-used representation)
     number_of_cells: list[int] | None = Field(
@@ -168,37 +286,10 @@ class PICMI_Cartesian1DGrid(_PICMIModel):
             self.bc_xmax is not None
         ), "Either upper_boundary_conditions or bc_xmax must be specified"
 
-        if self.number_of_cells is None:
-            self.number_of_cells = [self.nx]
-        if self.lower_bound is None:
-            self.lower_bound = [self.xmin]
-        if self.upper_bound is None:
-            self.upper_bound = [self.xmax]
-        if self.lower_boundary_conditions is None:
-            self.lower_boundary_conditions = [self.bc_xmin]
-        if self.upper_boundary_conditions is None:
-            self.upper_boundary_conditions = [self.bc_xmax]
-
-        # Sanity check and init of input arguments related to particle boundary parameters
+        # Resolve and synchronize the vector and per-axis forms, see _PICMIGrid
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
-        if self.lower_bound_particles is None:
-            self.lower_bound_particles = _fill_per_axis(
-                [self.xmin_particles], self.lower_bound
-            )
-        if self.upper_bound_particles is None:
-            self.upper_bound_particles = _fill_per_axis(
-                [self.xmax_particles], self.upper_bound
-            )
-
-        if self.lower_boundary_conditions_particles is None:
-            self.lower_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_xmin_particles], self.lower_boundary_conditions
-            )
-        if self.upper_boundary_conditions_particles is None:
-            self.upper_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_xmax_particles], self.upper_boundary_conditions
-            )
+        self._resolve_axis_groups()
 
         # Sanity check on dimensionality of vector quantities
         assert len(self.number_of_cells) == 1, "Wrong number of cells specified"
@@ -247,7 +338,7 @@ class PICMI_Cartesian1DGrid(_PICMIModel):
         self.refined_regions.append([level, lo, hi, refinement_factor])
 
 
-class PICMI_CylindricalGrid(_PICMIModel):
+class PICMI_CylindricalGrid(_PICMIGrid):
     """
     Axisymmetric, cylindrical grid
     Parameters can be specified either as vectors or separately.
@@ -269,10 +360,11 @@ class PICMI_CylindricalGrid(_PICMIModel):
 
     # Note for implementations, as a matter of convenience and flexibility, the user interface allows
     # specifying various quantities using either the individual named attributes (such as nr and nz) or a
-    # vector of values (such as number_of_cells). However, internally, only the vectors are saved and
-    # the implementation needs to use the those to access the user input.
+    # vector of values (such as number_of_cells). Both forms are kept in sync (see _PICMIGrid), but the
+    # implementation should use the vectors to access the user input.
 
     number_of_dimensions: ClassVar[int] = 2
+    _axis_groups: ClassVar[tuple[_AxisGroup, ...]] = _grid_axis_groups(("r", "z"), lower_boundary_condition_can_be_none=True)
 
     # Vector forms (the internally-used representation)
     number_of_cells: list[int] | None = Field(
@@ -410,39 +502,10 @@ class PICMI_CylindricalGrid(_PICMIModel):
             self.bc_rmax is not None and self.bc_zmax is not None
         ), "Either upper_boundary_conditions or bc_rmax and bc_zmax must be specified"
 
-        if self.number_of_cells is None:
-            self.number_of_cells = [self.nr, self.nz]
-        if self.lower_bound is None:
-            self.lower_bound = [self.rmin, self.zmin]
-        if self.upper_bound is None:
-            self.upper_bound = [self.rmax, self.zmax]
-        if self.lower_boundary_conditions is None:
-            self.lower_boundary_conditions = [self.bc_rmin, self.bc_zmin]
-        if self.upper_boundary_conditions is None:
-            self.upper_boundary_conditions = [self.bc_rmax, self.bc_zmax]
-
-        # Sanity check and init of input arguments related to particle boundary parameters
+        # Resolve and synchronize the vector and per-axis forms, see _PICMIGrid
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
-        if self.lower_bound_particles is None:
-            self.lower_bound_particles = _fill_per_axis(
-                [self.rmin_particles, self.zmin_particles], self.lower_bound
-            )
-        if self.upper_bound_particles is None:
-            self.upper_bound_particles = _fill_per_axis(
-                [self.rmax_particles, self.zmax_particles], self.upper_bound
-            )
-
-        if self.lower_boundary_conditions_particles is None:
-            self.lower_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_rmin_particles, self.bc_zmin_particles],
-                self.lower_boundary_conditions,
-            )
-        if self.upper_boundary_conditions_particles is None:
-            self.upper_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_rmax_particles, self.bc_zmax_particles],
-                self.upper_boundary_conditions,
-            )
+        self._resolve_axis_groups()
 
         # Sanity check on dimensionality of vector quantities
         assert len(self.number_of_cells) == 2, "Wrong number of cells specified"
@@ -453,6 +516,18 @@ class PICMI_CylindricalGrid(_PICMIModel):
         )
         assert len(self.upper_boundary_conditions) == 2, (
             "Wrong number of upper boundary conditions specified"
+        )
+        assert len(self.lower_bound_particles) == 2, (
+            "Wrong number of particle lower bounds specified"
+        )
+        assert len(self.upper_bound_particles) == 2, (
+            "Wrong number of particle upper bounds specified"
+        )
+        assert len(self.lower_boundary_conditions_particles) == 2, (
+            "Wrong number of lower particle boundary conditions specified"
+        )
+        assert len(self.upper_boundary_conditions_particles) == 2, (
+            "Wrong number of upper particle boundary conditions specified"
         )
 
         for region in self.refined_regions:
@@ -479,7 +554,7 @@ class PICMI_CylindricalGrid(_PICMIModel):
         self.refined_regions.append([level, lo, hi, refinement_factor])
 
 
-class PICMI_Cartesian2DGrid(_PICMIModel):
+class PICMI_Cartesian2DGrid(_PICMIGrid):
     """
     Two dimensional Cartesian grid
     Parameters can be specified either as vectors or separately.
@@ -501,10 +576,11 @@ class PICMI_Cartesian2DGrid(_PICMIModel):
 
     # Note for implementations, as a matter of convenience and flexibility, the user interface allows
     # specifying various quantities using either the individual named attributes (such as nx and ny) or a
-    # vector of values (such as number_of_cells). However, internally, only the vectors are saved and
-    # the implementation needs to use the those to access the user input.
+    # vector of values (such as number_of_cells). Both forms are kept in sync (see _PICMIGrid), but the
+    # implementation should use the vectors to access the user input.
 
     number_of_dimensions: ClassVar[int] = 2
+    _axis_groups: ClassVar[tuple[_AxisGroup, ...]] = _grid_axis_groups(("x", "y"))
 
     # Vector forms (the internally-used representation)
     number_of_cells: list[int] | None = Field(
@@ -637,39 +713,10 @@ class PICMI_Cartesian2DGrid(_PICMIModel):
             self.bc_xmax is not None and self.bc_ymax is not None
         ), "Either upper_boundary_conditions or bc_xmax and bc_ymax must be specified"
 
-        if self.number_of_cells is None:
-            self.number_of_cells = [self.nx, self.ny]
-        if self.lower_bound is None:
-            self.lower_bound = [self.xmin, self.ymin]
-        if self.upper_bound is None:
-            self.upper_bound = [self.xmax, self.ymax]
-        if self.lower_boundary_conditions is None:
-            self.lower_boundary_conditions = [self.bc_xmin, self.bc_ymin]
-        if self.upper_boundary_conditions is None:
-            self.upper_boundary_conditions = [self.bc_xmax, self.bc_ymax]
-
-        # Sanity check and init of input arguments related to particle boundary parameters
+        # Resolve and synchronize the vector and per-axis forms, see _PICMIGrid
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
-        if self.lower_bound_particles is None:
-            self.lower_bound_particles = _fill_per_axis(
-                [self.xmin_particles, self.ymin_particles], self.lower_bound
-            )
-        if self.upper_bound_particles is None:
-            self.upper_bound_particles = _fill_per_axis(
-                [self.xmax_particles, self.ymax_particles], self.upper_bound
-            )
-
-        if self.lower_boundary_conditions_particles is None:
-            self.lower_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_xmin_particles, self.bc_ymin_particles],
-                self.lower_boundary_conditions,
-            )
-        if self.upper_boundary_conditions_particles is None:
-            self.upper_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_xmax_particles, self.bc_ymax_particles],
-                self.upper_boundary_conditions,
-            )
+        self._resolve_axis_groups()
 
         # Sanity check on dimensionality of vector quantities
         assert len(self.number_of_cells) == 2, "Wrong number of cells specified"
@@ -718,7 +765,7 @@ class PICMI_Cartesian2DGrid(_PICMIModel):
         self.refined_regions.append([level, lo, hi, refinement_factor])
 
 
-class PICMI_Cartesian3DGrid(_PICMIModel):
+class PICMI_Cartesian3DGrid(_PICMIGrid):
     """
     Three dimensional Cartesian grid
     Parameters can be specified either as vectors or separately.
@@ -740,10 +787,11 @@ class PICMI_Cartesian3DGrid(_PICMIModel):
 
     # Note for implementations, as a matter of convenience and flexibility, the user interface allows
     # specifying various quantities using either the individual named attributes (such as nx, ny, and nz) or a
-    # vector of values (such as number_of_cells). However, internally, only the vectors are saved and
-    # the implementation needs to use the those to access the user input.
+    # vector of values (such as number_of_cells). Both forms are kept in sync (see _PICMIGrid), but the
+    # implementation should use the vectors to access the user input.
 
     number_of_dimensions: ClassVar[int] = 3
+    _axis_groups: ClassVar[tuple[_AxisGroup, ...]] = _grid_axis_groups(("x", "y", "z"))
 
     # Vector forms (the internally-used representation)
     number_of_cells: list[int] | None = Field(
@@ -918,41 +966,10 @@ class PICMI_Cartesian3DGrid(_PICMIModel):
                 and self.bc_zmax is not None
         ), "Either upper_boundary_conditions or bc_xmax, bc_ymax, and bc_zmax must be specified"
 
-        if self.number_of_cells is None:
-            self.number_of_cells = [self.nx, self.ny, self.nz]
-        if self.lower_bound is None:
-            self.lower_bound = [self.xmin, self.ymin, self.zmin]
-        if self.upper_bound is None:
-            self.upper_bound = [self.xmax, self.ymax, self.zmax]
-        if self.lower_boundary_conditions is None:
-            self.lower_boundary_conditions = [self.bc_xmin, self.bc_ymin, self.bc_zmin]
-        if self.upper_boundary_conditions is None:
-            self.upper_boundary_conditions = [self.bc_xmax, self.bc_ymax, self.bc_zmax]
-
-        # Sanity check and init of input arguments related to particle boundary parameters
+        # Resolve and synchronize the vector and per-axis forms, see _PICMIGrid
         # By default, if not specified, particle boundary values are the same as field boundary values
         # By default, if not specified, particle boundary conditions are the same as field boundary conditions
-        if self.lower_bound_particles is None:
-            self.lower_bound_particles = _fill_per_axis(
-                [self.xmin_particles, self.ymin_particles, self.zmin_particles],
-                self.lower_bound,
-            )
-        if self.upper_bound_particles is None:
-            self.upper_bound_particles = _fill_per_axis(
-                [self.xmax_particles, self.ymax_particles, self.zmax_particles],
-                self.upper_bound,
-            )
-
-        if self.lower_boundary_conditions_particles is None:
-            self.lower_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_xmin_particles, self.bc_ymin_particles, self.bc_zmin_particles],
-                self.lower_boundary_conditions,
-            )
-        if self.upper_boundary_conditions_particles is None:
-            self.upper_boundary_conditions_particles = _fill_per_axis(
-                [self.bc_xmax_particles, self.bc_ymax_particles, self.bc_zmax_particles],
-                self.upper_boundary_conditions,
-            )
+        self._resolve_axis_groups()
 
         # Sanity check on number of arguments of vector quantities
         assert len(self.number_of_cells) == 3, "Wrong number of cells specified"

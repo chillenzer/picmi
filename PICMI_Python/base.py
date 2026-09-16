@@ -6,7 +6,7 @@ import threading
 from itertools import repeat
 import warnings
 from typing import Self
-from pydantic import model_validator, BaseModel, SerializeAsAny, ConfigDict
+from pydantic import model_serializer, model_validator, BaseModel, SerializeAsAny, ConfigDict
 
 
 # Tracks which (instance, validator) pairs are currently executing, per thread, so that a
@@ -114,6 +114,41 @@ class _DocumentedModelMetaClass(type(BaseModel)):
         return super().__new__(mcs, name, bases, namespace, **kwargs)
 
 
+# --- Serialized PICMI objects carry the class they were dumped from under this key, so
+# --- that loading them restores the same (e.g. code-specific) class, also when nested in
+# --- another PICMI object or in a field that is not typed with a specific class.
+PICMI_CLASS_KEY = "picmi_class"
+
+# --- All pydantic-based PICMI classes (of the standard and of the implementing codes),
+# --- by their _picmi_class_name. Only these classes are instantiated when loading data.
+_picmi_classes = {}
+
+
+def _picmi_class_name(cls):
+    return f"{cls.__module__}.{cls.__qualname__}"
+
+
+def _registered_picmi_class(name):
+    try:
+        return _picmi_classes[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown {PICMI_CLASS_KEY} '{name}'. Import the module that defines this class before loading the data."
+        ) from None
+
+
+def _instantiate_picmi_objects(value):
+    """Turn (possibly nested in lists or tuples) dictionaries written by ``model_dump`` into
+    instances of the PICMI class recorded in them."""
+    if isinstance(value, dict) and PICMI_CLASS_KEY in value:
+        return _registered_picmi_class(value[PICMI_CLASS_KEY]).model_validate(value)
+    if isinstance(value, list):
+        return [_instantiate_picmi_objects(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_instantiate_picmi_objects(item) for item in value)
+    return value
+
+
 class _PICMIModel(BaseModel, metaclass=_DocumentedModelMetaClass):
     # Shared configuration for all pydantic-based PICMI classes.
     # - ``extra="forbid"`` restores the old behaviour of raising on unexpected keyword
@@ -122,12 +157,63 @@ class _PICMIModel(BaseModel, metaclass=_DocumentedModelMetaClass):
     #   ``<code>_`` alias while keeping their internal attribute name.
     # - ``arbitrary_types_allowed`` is needed while some referenced objects (grids,
     #   solvers, code-specific helper objects) are not yet pydantic models.
+    # - ``polymorphic_serialization`` serializes an object with the fields of its actual
+    #   class, e.g., a downstream grid passed to a solver keeps its code-specific fields
+    #   (by default, pydantic uses the fields of the annotated standard class).
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         populate_by_name=True,
         extra="forbid",
         validate_assignment=True,
+        polymorphic_serialization=True,
     )
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs):
+        super().__pydantic_init_subclass__(**kwargs)
+        _picmi_classes[_picmi_class_name(cls)] = cls
+
+    def __setattr__(self, name, value):
+        # Pydantic applies an assignment before running the model validators, and keeps it
+        # if they reject it. Restore the previous state in that case, so that a failed
+        # assignment (including the assignments that validators make to derived fields)
+        # leaves the object unchanged and valid.
+        if name not in type(self).model_fields:
+            return super().__setattr__(name, value)
+        previous_fields = dict(self.__dict__)
+        previous_fields_set = set(self.__pydantic_fields_set__)
+        previous_private = None if self.__pydantic_private__ is None else dict(self.__pydantic_private__)
+        try:
+            super().__setattr__(name, value)
+        except Exception:
+            object.__setattr__(self, "__dict__", previous_fields)
+            object.__setattr__(self, "__pydantic_fields_set__", previous_fields_set)
+            object.__setattr__(self, "__pydantic_private__", previous_private)
+            raise
+
+    @model_serializer(mode="wrap")
+    def _serialize_with_picmi_class(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            data = {PICMI_CLASS_KEY: _picmi_class_name(type(self)), **data}
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _load_picmi_classes(cls, data):
+        # Counterpart of _serialize_with_picmi_class: nested serialized PICMI objects are
+        # loaded as the class they were dumped from, instead of the (standard) class a field
+        # is annotated with, or a plain dictionary for fields that are not typed.
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        if PICMI_CLASS_KEY in data:
+            dumped_class = _registered_picmi_class(data.pop(PICMI_CLASS_KEY))
+            if not issubclass(cls, dumped_class):
+                raise ValueError(
+                    f"The data was dumped from {_picmi_class_name(dumped_class)} and cannot be loaded as {_picmi_class_name(cls)}."
+                )
+        return {key: _instantiate_picmi_objects(value) for key, value in data.items()}
 
     # PICMI objects are mutable handles to distinct entities of a simulation: two species
     # with identical parameters are still two species. Keep the identity-based equality and
