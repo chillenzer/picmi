@@ -1,13 +1,17 @@
 """Simulation class following the PICMI standard
 This should be the base classes for Python implementation of the PICMI standard
 """
-import math
-import sys
-from typing import Any
+from typing import Any, Literal, Sequence
 
 from pydantic import Field
 
-from .base import _ClassWithInit, _PICMIModel
+from .applied_fields import PICMI_AnyAppliedField
+from .base import _PICMIModel
+from .diagnostics import PICMI_AnyDiagnostic
+from .fields import PICMI_AnySolver
+from .interactions import PICMI_AnyInteraction
+from .lasers import PICMI_AnyLaser, PICMI_AnyLaserInjection
+from .particles import PICMI_AnyLayout, PICMI_AnySpecies
 
 # ---------------------
 # Main simulation object
@@ -18,7 +22,7 @@ class PICMI_Simulation(_PICMIModel):
     Creates a Simulation object
     """
 
-    solver: Any | None = Field(
+    solver: PICMI_AnySolver | None = Field(
         default=None,
         description="This is the field solver to be used in the simulation. It should be an instance of field solver classes."
     )
@@ -38,7 +42,7 @@ class PICMI_Simulation(_PICMIModel):
         default=None,
         description="Verbosity flag. A larger integer results in more verbose output"
     )
-    particle_shape: str | int | None = Field(
+    particle_shape: Literal["NGP", "linear", "quadratic", "cubic"] | int | None = Field(
         default="linear",
         description="Default particle shape for species added to this simulation. One of 'NGP', 'linear', 'quadratic', 'cubic', or the equivalent integer interpolation order."
     )
@@ -46,22 +50,61 @@ class PICMI_Simulation(_PICMIModel):
         default=None,
         description="Lorentz factor of the boosted simulation frame. Note that all input values should be in the lab frame."
     )
+    # The standard leaves the meaning, and thus the type, of this parameter to the codes.
     load_balancing: Any | None = Field(
         default=None,
         description="Controls load balancing (code dependent)."
     )
 
     # The following lists are populated through the add_* methods rather than at construction.
-    species: list = Field(default_factory=list)
-    layouts: list = Field(default_factory=list)
-    initialize_self_fields: list = Field(default_factory=list)
-    injection_plane_positions: list = Field(default_factory=list)
-    injection_plane_normal_vectors: list = Field(default_factory=list)
-    lasers: list = Field(default_factory=list)
-    laser_injection_methods: list = Field(default_factory=list)
-    applied_fields: list = Field(default_factory=list)
-    diagnostics: list = Field(default_factory=list)
-    interactions: list = Field(default_factory=list)
+    # The entries with the same index belong together, e.g., species[i] and layouts[i].
+    species: list[PICMI_AnySpecies] = Field(
+        default_factory=list,
+        description="Species added with add_species or add_species_through_plane"
+    )
+    layouts: list[PICMI_AnyLayout | list[PICMI_AnyLayout] | None] = Field(
+        default_factory=list,
+        description="Layout (or list of layouts, one per initial distribution) of each species"
+    )
+    initialize_self_fields: list[bool | None] = Field(
+        default_factory=list,
+        description="Whether the initial space-charge fields of each species are calculated"
+    )
+    injection_plane_positions: list[float | Sequence[float] | None] = Field(
+        default_factory=list,
+        description="Position of one point of the injection plane of each species"
+    )
+    injection_plane_normal_vectors: list[Sequence[float] | None] = Field(
+        default_factory=list,
+        description="Vector normal to the injection plane of each species"
+    )
+    lasers: list[PICMI_AnyLaser] = Field(
+        default_factory=list,
+        description="Lasers added with add_laser"
+    )
+    laser_injection_methods: list[PICMI_AnyLaserInjection | None] = Field(
+        default_factory=list,
+        description="Injection method of each laser"
+    )
+    applied_fields: list[PICMI_AnyAppliedField] = Field(
+        default_factory=list,
+        description="Applied fields added with add_applied_field"
+    )
+    diagnostics: list[PICMI_AnyDiagnostic] = Field(
+        default_factory=list,
+        description="Diagnostics added with add_diagnostic"
+    )
+    interactions: list[PICMI_AnyInteraction] = Field(
+        default_factory=list,
+        description="Interactions added with add_interaction"
+    )
+
+    def _append(self, **entries):
+        """Append to list fields. Assigning extended lists (instead of appending in place)
+        validates the new entries; either all lists are extended or none."""
+        with self._atomic_update():
+            for name, entry in entries.items():
+                setattr(self, name, [*getattr(self, name), entry])
 
     def add_species(self, species, layout, initialize_self_field=None):
         """
@@ -82,11 +125,13 @@ class PICMI_Simulation(_PICMIModel):
             Whether the initial space-charge fields of this species
             is calculated and added to the simulation
         """
-        self.species.append(species)
-        self.layouts.append(layout)
-        self.initialize_self_fields.append(initialize_self_field)
-        self.injection_plane_positions.append(None)
-        self.injection_plane_normal_vectors.append(None)
+        self._append(
+            species=species,
+            layouts=layout,
+            initialize_self_fields=initialize_self_field,
+            injection_plane_positions=None,
+            injection_plane_normal_vectors=None,
+        )
 
 
     def add_species_through_plane(self, species, layout,
@@ -117,11 +162,13 @@ class PICMI_Simulation(_PICMIModel):
         injection_plane_normal_vector: vector of floats
             Vector normal to injection plane
         """
-        self.species.append(species)
-        self.layouts.append(layout)
-        self.initialize_self_fields.append(initialize_self_field)
-        self.injection_plane_positions.append(injection_plane_position)
-        self.injection_plane_normal_vectors.append(injection_plane_normal_vector)
+        self._append(
+            species=species,
+            layouts=layout,
+            initialize_self_fields=initialize_self_field,
+            injection_plane_positions=injection_plane_position,
+            injection_plane_normal_vectors=injection_plane_normal_vector,
+        )
 
 
     def add_laser(self, laser, injection_method):
@@ -142,8 +189,7 @@ class PICMI_Simulation(_PICMIModel):
             It is up to each code to define the default method
             of injection, if the user does not provide injection_method.
         """
-        self.lasers.append(laser)
-        self.laser_injection_methods.append(injection_method)
+        self._append(lasers=laser, laser_injection_methods=injection_method)
 
     def add_applied_field(self, applied_field):
         """
@@ -155,7 +201,7 @@ class PICMI_Simulation(_PICMIModel):
             One of the applied field instance.
             Specifies the properties of the applied field.
         """
-        self.applied_fields.append(applied_field)
+        self._append(applied_fields=applied_field)
 
     def add_diagnostic(self, diagnostic):
         """
@@ -166,7 +212,7 @@ class PICMI_Simulation(_PICMIModel):
         diagnostic: diagnostic instance
             One of the diagnostic instances.
         """
-        self.diagnostics.append(diagnostic)
+        self._append(diagnostics=diagnostic)
 
     def add_interaction(self, interaction):
         """
@@ -177,7 +223,7 @@ class PICMI_Simulation(_PICMIModel):
         interaction: interaction instance
             One of the interaction objects.
         """
-        self.interactions.append(interaction)
+        self._append(interactions=interaction)
 
     def set_max_step(self, max_steps):
         """

@@ -46,8 +46,6 @@ class CylindricalGrid(picmistandard.PICMI_CylindricalGrid):
     )
 
 class Simulation(picmistandard.PICMI_Simulation):
-    def init(self, kw):
-        pass
     def write_input_file(self, file_name):
         pass
     def step(self, nsteps=1):

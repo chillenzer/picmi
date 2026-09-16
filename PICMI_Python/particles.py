@@ -3,60 +3,66 @@ These should be the base classes for Python implementation of the PICMI standard
 The classes in the file are all particle related
 """
 
-import re
 from functools import partial
-from typing import Annotated, ClassVar, Literal
+from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, Field, PrivateAttr, field_validator, model_validator
 
-from .base import _ClassWithInit, _PICMIModel, broadcast_validation, with_mutually_exclusive, PICMI_Extension
+from .base import (
+    Expression,
+    PICMI_DistributionExtension,
+    PICMI_LayoutExtension,
+    _PICMIModel,
+    PICMI_ExpressionParameters,
+    broadcast_validation,
+    resolve_once,
+    with_mutually_exclusive,
+)
 from .fields import PICMI_AnyGrid
-from .interactions import PICMI_AnyInteraction
+from .interactions import PICMI_AnyInteraction, PICMI_FieldIonization
 
 # ---------------
 # Physics objects
 # ---------------
 
 
-class PICMI_GaussianBunchDistribution(_ClassWithInit):
+class PICMI_GaussianBunchDistribution(_PICMIModel):
     """
     Describes a Gaussian distribution of particles
-
-    Parameters
-    ----------
-    n_physical_particles: integer
-        Number of physical particles in the bunch
-
-    rms_bunch_size: vector of length 3 of floats
-        RMS bunch size at t=0 [m]
-
-    rms_velocity: vector of length 3 of floats, default=[0.,0.,0.]
-        RMS velocity spread at t=0 [m/s]
-
-    centroid_position: vector of length 3 of floats, default=[0.,0.,0.]
-        Position of the bunch centroid at t=0 [m]
-
-    centroid_velocity: vector of length 3 of floats, default=[0.,0.,0.]
-        Velocity (gamma*V) of the bunch centroid at t=0 [m/s]
-
-    velocity_divergence: vector of length 3 of floats, default=[0.,0.,0.]
-        Expansion rate of the bunch at t=0 [m/s/m]
     """
-    def __init__(self,n_physical_particles, rms_bunch_size,
-                 rms_velocity = [0.,0.,0.],
-                 centroid_position = [0.,0.,0.],
-                 centroid_velocity = [0.,0.,0.],
-                 velocity_divergence = [0.,0.,0.],
-                 **kw):
-        self.n_physical_particles = n_physical_particles
-        self.rms_bunch_size = rms_bunch_size
-        self.rms_velocity = rms_velocity
-        self.centroid_position = centroid_position
-        self.centroid_velocity = centroid_velocity
-        self.velocity_divergence = velocity_divergence
-
-        self.handle_init(kw)
+    n_physical_particles: float = Field(ge=0.,
+        description="Number of physical particles in the bunch"
+    )
+    rms_bunch_size: list[float] = Field(
+        min_length=3,
+        max_length=3,
+        description="RMS bunch size at t=0 [m]"
+    )
+    rms_velocity: list[float] = Field(
+        default_factory=lambda: [0., 0., 0.],
+        min_length=3,
+        max_length=3,
+        description="RMS velocity spread at t=0 [m/s]"
+    )
+    centroid_position: list[float] = Field(
+        default_factory=lambda: [0., 0., 0.],
+        min_length=3,
+        max_length=3,
+        description="Position of the bunch centroid at t=0 [m]"
+    )
+    centroid_velocity: list[float] = Field(
+        default_factory=lambda: [0., 0., 0.],
+        min_length=3,
+        max_length=3,
+        description="Velocity (gamma*V) of the bunch centroid at t=0 [m/s]"
+    )
+    velocity_divergence: list[float] = Field(
+        default_factory=lambda: [0., 0., 0.],
+        min_length=3,
+        max_length=3,
+        description="Expansion rate of the bunch at t=0 [m/s/m]"
+    )
 
 
 class PICMI_UniformDistribution(_PICMIModel):
@@ -146,83 +152,70 @@ class PICMI_FoilDistribution(_PICMIModel):
         description="Flags whether to fill in the empty spaced opened up when the grid moves"
     )
 
-class PICMI_AnalyticFluxDistribution(_ClassWithInit):
+class PICMI_AnalyticFluxDistribution(PICMI_ExpressionParameters):
     """
     Describes a flux of particles emitted from a plane
 
-    Parameters
-    ----------
-    flux: string
-        Analytic expression describing flux of particles [m^-2.s^-1]
-        Expression should be in terms of the position and time, written as 'x', 'y', 'z', and 't'.
-
-    flux_normal_axis: string
-        x, y, or z for 3D, x or z for 2D, or r, t, or z in RZ geometry
-
-    surface_flux_position: double
-        location of the injection plane [m] along the direction
-        specified by `flux_normal_axis`
-
-    flux_direction: int
-        Direction of the flux relative to the plane: -1 or +1
-
-    lower_bound: vector of floats, optional
-        Lower bound of the distribution [m]
-
-    upper_bound: vector of floats, optional
-        Upper bound of the distribution [m]
-
-    rms_velocity: vector of floats, default=[0.,0.,0.]
-        Thermal velocity spread [m/s]
-
-    directed_velocity: vector of floats, default=[0.,0.,0.]
-        Directed, average, proper velocity [m/s]
-
-    flux_tmin: float, optional
-        Time at which the flux injection will be turned on.
-
-    flux_tmax: float, optional
-        Time at which the flux injection will be turned off.
-
-    gaussian_flux_momentum_distribution: bool, optional
-        If True, the momentum distribution is v*Gaussian,
-        in the direction normal to the plane. Otherwise,
-        the momentum distribution is simply Gaussian.
+    Parameters can be used in the flux expression, with their values given as keyword arguments.
     """
+    _expression_fields: ClassVar[tuple[str, ...]] = ("flux",)
 
-    def __init__(self, flux, flux_normal_axis,
-                 surface_flux_position, flux_direction,
-                 lower_bound = [None,None,None],
-                 upper_bound = [None,None,None],
-                 rms_velocity = [0.,0.,0.],
-                 directed_velocity = [0.,0.,0.],
-                 flux_tmin = None,
-                 flux_tmax = None,
-                 gaussian_flux_momentum_distribution = None,
-                 **kw):
-        self.flux = f'{flux}'.replace('\n', '')
-        self.flux_normal_axis = flux_normal_axis
-        self.surface_flux_position = surface_flux_position
-        self.flux_direction = flux_direction
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-        self.rms_velocity = rms_velocity
-        self.directed_velocity = directed_velocity
-        self.flux_tmin = flux_tmin
-        self.flux_tmax = flux_tmax
-        self.gaussian_flux_momentum_distribution = gaussian_flux_momentum_distribution
-
-        self.user_defined_kw = {}
-        for k in list(kw.keys()):
-            if re.search(r'\b%s\b'%k, self.flux):
-                self.user_defined_kw[k] = kw[k]
-                del kw[k]
-
-        self.handle_init(kw)
+    flux: Expression = Field(
+        description="Analytic expression describing flux of particles [m^-2.s^-1]. Expression should be in terms of the position and time, written as 'x', 'y', 'z', and 't'."
+    )
+    flux_normal_axis: str = Field(
+        description="x, y, or z for 3D, x or z for 2D, or r, t, or z in RZ geometry"
+    )
+    surface_flux_position: float = Field(
+        description="Location of the injection plane [m] along the direction specified by `flux_normal_axis`"
+    )
+    flux_direction: Literal[-1, 1] = Field(
+        description="Direction of the flux relative to the plane: -1 or +1"
+    )
+    lower_bound: list[float | None] = Field(
+        default_factory=lambda: [None, None, None],
+        min_length=3,
+        max_length=3,
+        description="Lower bound of the distribution [m]"
+    )
+    upper_bound: list[float | None] = Field(
+        default_factory=lambda: [None, None, None],
+        min_length=3,
+        max_length=3,
+        description="Upper bound of the distribution [m]"
+    )
+    rms_velocity: list[float] = Field(
+        default_factory=lambda: [0., 0., 0.],
+        min_length=3,
+        max_length=3,
+        description="Thermal velocity spread [m/s]"
+    )
+    directed_velocity: list[float] = Field(
+        default_factory=lambda: [0., 0., 0.],
+        min_length=3,
+        max_length=3,
+        description="Directed, average, proper velocity [m/s]"
+    )
+    flux_tmin: float | None = Field(
+        default=None,
+        description="Time at which the flux injection will be turned on."
+    )
+    flux_tmax: float | None = Field(
+        default=None,
+        description="Time at which the flux injection will be turned off."
+    )
+    gaussian_flux_momentum_distribution: bool | None = Field(
+        default=None,
+        description="If True, the momentum distribution is v*Gaussian, in the direction normal to the plane. Otherwise, the momentum distribution is simply Gaussian."
+    )
+    user_defined_kw: dict = Field(
+        default_factory=dict,
+        description="Constants referenced in the flux expression, collected from otherwise-unrecognized keyword arguments."
+    )
 
 PICMI_UniformFluxDistribution = PICMI_AnalyticFluxDistribution
 
-class PICMI_AnalyticDistribution(_PICMIModel):
+class PICMI_AnalyticDistribution(PICMI_ExpressionParameters):
     """
     Describes a plasma with density following a provided analytic expression
 
@@ -237,14 +230,18 @@ class PICMI_AnalyticDistribution(_PICMIModel):
                                     n0 = 1.e20,
                                     ...)
     """
-    density_expression: str = Field(
+    _expression_fields: ClassVar[tuple[str, ...]] = (
+        "density_expression", "momentum_expressions", "momentum_spread_expressions"
+    )
+
+    density_expression: Expression = Field(
         description="Analytic expression describing physical number density [m^-3]. Expression should be in terms of the position, written as 'x', 'y', and 'z'. Parameters can be used in the expression with the values given as keyword arguments."
     )
-    momentum_expressions: list[str | None] = Field(
+    momentum_expressions: list[Expression | None] = Field(
         default_factory=lambda: [None, None, None],
         description="Analytic expressions describing the gamma*velocity for each axis [m/s]. Expressions should be in terms of the position, written as 'x', 'y', and 'z'. For any axis not supplied (set to None), directed_velocity will be used."
     )
-    momentum_spread_expressions: list[str | None] = Field(
+    momentum_spread_expressions: list[Expression | None] = Field(
         default_factory=lambda: [None, None, None],
         description="Analytic expressions describing the gamma*velocity Gaussian thermal spread sigma for each axis [m/s]. For any axis not supplied (set to None), zero will be used."
     )
@@ -273,131 +270,80 @@ class PICMI_AnalyticDistribution(_PICMIModel):
         description="Constants referenced in the analytic expressions, collected from otherwise-unrecognized keyword arguments."
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_expressions_and_collect_kw(cls, data):
-        # Stringify expressions (so e.g. a numeric density may be passed) and collect any
-        # keyword arguments that are referenced in the expressions into user_defined_kw.
-        # It is up to the implementing code to make sure all parameters used in the
-        # expressions are defined.
-        if not isinstance(data, dict):
-            return data
-        data = dict(data)
 
-        if data.get("density_expression") is not None:
-            data["density_expression"] = f'{data["density_expression"]}'.replace('\n', '')
-        for key in ("momentum_expressions", "momentum_spread_expressions"):
-            exprs = data.get(key)
-            if exprs is not None:
-                data[key] = [None if e is None else f'{e}'.replace('\n', '') for e in exprs]
-
-        density_expression = data.get("density_expression") or ""
-        momentum_expressions = data.get("momentum_expressions") or [None, None, None]
-
-        known = set()
-        for fname, finfo in cls.model_fields.items():
-            known.add(fname)
-            if finfo.alias:
-                known.add(finfo.alias)
-
-        user_defined_kw = dict(data.get("user_defined_kw", {}))
-        for k in list(data.keys()):
-            if k in known:
-                continue
-            referenced = bool(re.search(r'\b%s\b' % re.escape(k), density_expression))
-            if not referenced:
-                for me in momentum_expressions:
-                    if me is not None and re.search(r'\b%s\b' % re.escape(k), me):
-                        referenced = True
-                        break
-            if referenced:
-                user_defined_kw[k] = data.pop(k)
-        data["user_defined_kw"] = user_defined_kw
-        return data
-
-
-class PICMI_ParticleListDistribution(_ClassWithInit):
+class PICMI_ParticleListDistribution(_PICMIModel):
     """
     Load particles at the specified positions and velocities
 
-    Parameters
-    ----------
-    x: float, default=0.
-        List of x positions of the particles [m]
-
-    y: float, default=0.
-        List of y positions of the particles [m]
-
-    z: float, default=0.
-        List of z positions of the particles [m]
-
-    ux: float, default=0.
-        List of ux positions of the particles (ux = gamma*vx) [m/s]
-
-    uy: float, default=0.
-        List of uy positions of the particles (uy = gamma*vy) [m/s]
-
-    uz: float, default=0.
-        List of uz positions of the particles (uz = gamma*vz) [m/s]
-
-    weight: float
-        Particle weight or list of weights, number of real particles per simulation particle
+    The positions and velocities can be given as lists, or as a single value that is used for
+    all particles. All lists must have the same length.
     """
-    def __init__(self, x=0., y=0., z=0., ux=0., uy=0., uz=0., weight=0.,
-                 **kw):
-        # --- Get length of arrays, set to one for scalars
-        lenx = np.size(x)
-        leny = np.size(y)
-        lenz = np.size(z)
-        lenux = np.size(ux)
-        lenuy = np.size(uy)
-        lenuz = np.size(uz)
-        lenw = np.size(weight)
+    x: list[float] = Field(
+        default_factory=lambda: [0.],
+        description="List of x positions of the particles [m]"
+    )
+    y: list[float] = Field(
+        default_factory=lambda: [0.],
+        description="List of y positions of the particles [m]"
+    )
+    z: list[float] = Field(
+        default_factory=lambda: [0.],
+        description="List of z positions of the particles [m]"
+    )
+    ux: list[float] = Field(
+        default_factory=lambda: [0.],
+        description="List of ux of the particles (ux = gamma*vx) [m/s]"
+    )
+    uy: list[float] = Field(
+        default_factory=lambda: [0.],
+        description="List of uy of the particles (uy = gamma*vy) [m/s]"
+    )
+    uz: list[float] = Field(
+        default_factory=lambda: [0.],
+        description="List of uz of the particles (uz = gamma*vz) [m/s]"
+    )
+    weight: float | list[float] = Field(
+        default=0.,
+        description="Particle weight or list of weights, number of real particles per simulation particle"
+    )
 
-        maxlen = max(lenx, leny, lenz, lenux, lenuy, lenuz, lenw)
-        assert lenx==maxlen or lenx==1, "Length of x doesn't match len of others"
-        assert leny==maxlen or leny==1, "Length of y doesn't match len of others"
-        assert lenz==maxlen or lenz==1, "Length of z doesn't match len of others"
-        assert lenux==maxlen or lenux==1, "Length of ux doesn't match len of others"
-        assert lenuy==maxlen or lenuy==1, "Length of uy doesn't match len of others"
-        assert lenuz==maxlen or lenuz==1, "Length of uz doesn't match len of others"
-        assert lenw==maxlen or lenw==1, "Length of weight doesn't match len of others"
+    _per_particle_fields: ClassVar[tuple[str, ...]] = ("x", "y", "z", "ux", "uy", "uz")
 
-        if lenx == 1:
-            x = np.array(x)*np.ones(maxlen)
-        if leny == 1:
-            y = np.array(y)*np.ones(maxlen)
-        if lenz == 1:
-            z = np.array(z)*np.ones(maxlen)
-        if lenux == 1:
-            ux = np.array(ux)*np.ones(maxlen)
-        if lenuy == 1:
-            uy = np.array(uy)*np.ones(maxlen)
-        if lenuz == 1:
-            uz = np.array(uz)*np.ones(maxlen,'d')
-        # --- Note that weight can be a scalar
+    @field_validator(*_per_particle_fields, mode="before")
+    @classmethod
+    def _as_list(cls, value):
+        # a single value (or an array) becomes a list
+        return np.atleast_1d(value).tolist()
 
-        self.weight = weight
-        self.x = x
-        self.y = y
-        self.z = z
-        self.ux = ux
-        self.uy = uy
-        self.uz = uz
+    @field_validator("weight", mode="before")
+    @classmethod
+    def _weight_as_float_or_list(cls, value):
+        # note that the weight can be a scalar
+        return value if np.ndim(value) == 0 else np.atleast_1d(value).tolist()
 
-        self.handle_init(kw)
+    @model_validator(mode="after")
+    @resolve_once
+    def _broadcast_to_the_number_of_particles(self) -> Self:
+        lengths = {name: len(getattr(self, name)) for name in self._per_particle_fields}
+        lengths["weight"] = np.size(self.weight)
+        number_of_particles = max(lengths.values())
+        for name, length in lengths.items():
+            assert length in (number_of_particles, 1), f"Length of {name} doesn't match len of others"
+        for name in self._per_particle_fields:
+            if lengths[name] == 1 and number_of_particles > 1:
+                setattr(self, name, getattr(self, name) * number_of_particles)
+        return self
 
 
-class PICMI_FromFileDistribution(_ClassWithInit):
+class PICMI_FromFileDistribution(_PICMIModel):
     """
     Load particles from an openPMD file.
 
     The openPMD file must contain the attributes `position`, `momentum`, `weighting`.
     """
-
-    def __init__(self, file_path, **kw):
-        self.file_path = file_path
-        self.handle_init(kw)
+    file_path: str = Field(
+        description="Path to the openPMD file"
+    )
 
 
 PICMI_AnyDistribution = (
@@ -405,11 +351,10 @@ PICMI_AnyDistribution = (
     | PICMI_UniformDistribution
     | PICMI_FoilDistribution
     | PICMI_AnalyticFluxDistribution
-    | PICMI_UniformFluxDistribution
     | PICMI_AnalyticDistribution
     | PICMI_ParticleListDistribution
     | PICMI_FromFileDistribution
-    | PICMI_Extension
+    | PICMI_DistributionExtension
 )
 
 
@@ -418,30 +363,30 @@ PICMI_AnyDistribution = (
 # ------------------
 
 
-class PICMI_ParticleDistributionPlanarInjector(_ClassWithInit):
+class PICMI_ParticleDistributionPlanarInjector(_PICMIModel):
     """
     Describes the injection of particles from a plane
-
-    Parameters
-    ----------
-    position: vector of length 3 of floats
-        Position of the particle centroid [m]
-
-    plane_normal: vector of length 3 of floats
-        Vector normal to the plane of injection [1]
-
-    plane_velocity: vector of length 3 of floats
-        Velocity of the plane of injection [m/s]
-
-    method: {'InPlace', 'Plane'}
     """
-    def __init__(self, position, plane_normal, plane_velocity=[0.,0.,0.], method='InPlace', **kw):
-        self.position = position
-        self.plane_normal = plane_normal
-        self.plane_velocity = plane_velocity
-        self.method = method
-
-        self.handle_init(kw)
+    position: list[float] = Field(
+        min_length=3,
+        max_length=3,
+        description="Position of the particle centroid [m]"
+    )
+    plane_normal: list[float] = Field(
+        min_length=3,
+        max_length=3,
+        description="Vector normal to the plane of injection [1]"
+    )
+    plane_velocity: list[float] = Field(
+        default_factory=lambda: [0., 0., 0.],
+        min_length=3,
+        max_length=3,
+        description="Velocity of the plane of injection [m/s]"
+    )
+    method: Literal["InPlace", "Plane"] = Field(
+        default="InPlace",
+        description="Method of injection"
+    )
 
 
 class PICMI_GriddedLayout(_PICMIModel):
@@ -499,6 +444,9 @@ class PICMI_PseudoRandomLayout(_PICMIModel):
         default=None,
         description="Grid object specifying the grid to follow for n_macroparticles_per_cell. If not specified, the underlying grid of the code is used."
     )
+
+
+PICMI_AnyLayout = PICMI_GriddedLayout | PICMI_PseudoRandomLayout | PICMI_LayoutExtension
 
 
 class PICMI_Species(_PICMIModel):
@@ -563,7 +511,15 @@ class PICMI_Species(_PICMIModel):
         return v
 
 
-class PICMI_MultiSpecies(_ClassWithInit):
+# The species and the interactions reference each other
+PICMI_FieldIonization.model_rebuild(_types_namespace={"PICMI_Species": PICMI_Species})
+PICMI_Species.model_rebuild(force=True)
+
+
+_ParticleShape = Literal["NGP", "linear", "quadratic", "cubic"] | int
+
+
+class PICMI_MultiSpecies(_PICMIModel):
     """
     INCOMPLETE: proportions argument is not implemented
     Multiple species that are initialized with the same distribution.
@@ -571,120 +527,125 @@ class PICMI_MultiSpecies(_ClassWithInit):
     The species charge and mass can be specified by setting the particle type or by setting them directly.
     If the particle type is specified, the charge or mass can be set to override the value from the type.
 
-    Parameters
-    ----------
-    particle_types: list of strings, optional
-        A string specifying an elementary particle, atom, or other, as defined in
-        the openPMD 2 species type extension, openPMD-standard/EXT_SpeciesType.md
-
-    names: list of strings, optional
-        Names of the species
-
-    charge_states: list of floats, optional
-        Charge states of the species (applies only to atoms)
-
-    charges: list of floats, optional
-        Particle charges, required when type is not specified, otherwise determined from type [C]
-
-    masses: list of floats, optional
-        Particle masses, required when type is not specified, otherwise determined from type [kg]
-
-    proportions: list of floats, optional
-        Proportions of the initial distribution made up by each species
-
-    initial_distribution: distribution instance
-        Initial particle distribution, applied to all species
-
-    particle_shape: {'NGP', 'linear', 'quadratic', 'cubic'}
-        Particle shape used for deposition and gather.
-        If not specified, the value from the `Simulation` object will be used.
-        Other values maybe specified that are code dependent.
+    The species are created at construction, so their parameters cannot be changed afterwards.
     """
 
     # --- Note to developer: This class attribute needs to be set to the Species class
     # --- defined in the codes PICMI implementation.
-    Species_class = None
+    Species_class: ClassVar[type[PICMI_Species] | None] = None
 
-    def __init__(
-        self,
-        particle_types=None,
-        names=None,
-        charge_states=None,
-        charges=None,
-        masses=None,
-        proportions=None,
-        initial_distribution=None,
-        particle_shape=None,
-        **kw,
-    ):
+    particle_types: str | list[str | None] | None = Field(
+        default=None,
+        frozen=True,
+        description="A string specifying an elementary particle, atom, or other, as defined in the openPMD 2 species type extension, openPMD-standard/EXT_SpeciesType.md"
+    )
+    names: str | list[str | None] | None = Field(
+        default=None,
+        frozen=True,
+        description="Names of the species"
+    )
+    charge_states: float | list[float | None] | None = Field(
+        default=None,
+        frozen=True,
+        description="Charge states of the species (applies only to atoms)"
+    )
+    charges: float | list[float | None] | None = Field(
+        default=None,
+        frozen=True,
+        description="Particle charges, required when type is not specified, otherwise determined from type [C]"
+    )
+    masses: float | list[float | None] | None = Field(
+        default=None,
+        frozen=True,
+        description="Particle masses, required when type is not specified, otherwise determined from type [kg]"
+    )
+    proportions: float | list[float | None] | None = Field(
+        default=None,
+        frozen=True,
+        description="Proportions of the initial distribution made up by each species"
+    )
+    initial_distribution: PICMI_AnyDistribution | list[PICMI_AnyDistribution] | None = Field(
+        default=None,
+        frozen=True,
+        description="Initial particle distribution, applied to all species"
+    )
+    particle_shape: _ParticleShape | None = Field(
+        default=None,
+        frozen=True,
+        description="Particle shape used for deposition and gather ('NGP', 'linear', 'quadratic', 'cubic'). If not specified, the value from the `Simulation` object will be used. Other values maybe specified that are code dependent."
+    )
 
-        self.particle_types = particle_types
-        self.names = names
-        self.charges = charges
-        self.charge_states = charge_states
-        self.masses = masses
-        self.proportions = proportions
-        self.initial_distribution = initial_distribution
-        self.particle_shape = particle_shape
+    _per_species_fields: ClassVar[tuple[str, ...]] = (
+        "particle_types", "names", "charge_states", "charges", "masses", "proportions"
+    )
+    _species_instances_list: list[PICMI_Species] = PrivateAttr(default_factory=list)
+    _species_instances_dict: dict[str, PICMI_Species] = PrivateAttr(default_factory=dict)
 
-        self.nspecies = None
-        self.check_nspecies(particle_types)
-        self.check_nspecies(names)
-        self.check_nspecies(charges)
-        self.check_nspecies(charge_states)
-        self.check_nspecies(masses)
-        self.check_nspecies(proportions)
+    @staticmethod
+    def get_input_item(var, i):
+        """The value for the i-th species of a parameter given for each species or for all"""
+        if var is None or not isinstance(var, list):
+            return var
+        return var[i]
 
-        # --- Create the instances of each species
-        self.species_instances_list = []
-        self.species_instances_dict = {}
-        for i in range(self.nspecies):
-            particle_type = self.get_input_item(particle_types, i)
-            name = self.get_input_item(names, i)
-            charge = self.get_input_item(charges, i)
-            charge_state = self.get_input_item(charge_states, i)
-            mass = self.get_input_item(masses, i)
-            proportion = self.get_input_item(proportions, i)
-            specie = PICMI_MultiSpecies.Species_class(
-                particle_type=particle_type,
+    @model_validator(mode="after")
+    @resolve_once
+    def _create_species(self) -> Self:
+        if self._species_instances_list:
+            # created at construction
+            return self
+
+        # The lists give a value per species, single values are given to all species.
+        given = [getattr(self, name) for name in self._per_species_fields if getattr(self, name) is not None]
+        if not given:
+            raise ValueError(f"At least one of {', '.join(self._per_species_fields)} must be specified")
+        lengths = {len(var) for var in given if isinstance(var, list)}
+        if len(lengths) > 1:
+            raise ValueError("All inputs must have the same length")
+        nspecies = lengths.pop() if lengths else 1
+        if PICMI_MultiSpecies.Species_class is None:
+            raise TypeError("The implementing code must set PICMI_MultiSpecies.Species_class")
+
+        for i in range(nspecies):
+            name = self.get_input_item(self.names, i)
+            species = PICMI_MultiSpecies.Species_class(
+                particle_type=self.get_input_item(self.particle_types, i),
                 name=name,
-                charge=charge,
-                charge_state=charge_state,
-                mass=mass,
-                initial_distribution=initial_distribution,
-                density_scale=proportion,
+                charge=self.get_input_item(self.charges, i),
+                charge_state=self.get_input_item(self.charge_states, i),
+                mass=self.get_input_item(self.masses, i),
+                initial_distribution=self.initial_distribution,
+                density_scale=self.get_input_item(self.proportions, i),
+                particle_shape=self.particle_shape,
             )
-            self.species_instances_list.append(specie)
+            self._species_instances_list.append(species)
             if name is not None:
-                self.species_instances_dict[name] = specie
+                self._species_instances_dict[name] = species
+        return self
 
-        self.handle_init(kw)
+    @property
+    def nspecies(self):
+        """Number of species"""
+        return len(self._species_instances_list)
 
-    def check_nspecies(self, var):
-        if var is not None:
-            try:
-                nvars = len(var)
-            except TypeError:
-                nvars = 1
-            assert self.nspecies is None or self.nspecies == nvars, Exception("All inputs must have the same length")
-            self.nspecies = nvars
+    @property
+    def species_instances_list(self):
+        """The species instances, in order"""
+        return self._species_instances_list
 
-    def get_input_item(self, var, i):
-        if var is None:
-            return None
-        else:
-            try:
-                len(var)
-            except TypeError:
-                return var
-            else:
-                return var[i]
+    @property
+    def species_instances_dict(self):
+        """The species instances that have a name, by name"""
+        return self._species_instances_dict
 
     def __len__(self):
         return self.nspecies
 
     def __getitem__(self, key):
         if isinstance(key, str):
-            return self.species_instances_dict[key]
+            return self._species_instances_dict[key]
         else:
-            return self.species_instances_list[key]
+            return self._species_instances_list[key]
+
+
+PICMI_AnySpecies = PICMI_Species | PICMI_MultiSpecies

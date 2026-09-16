@@ -3,9 +3,9 @@ These should be the base classes for Python implementation of the PICMI standard
 """
 
 from typing import ClassVar, Literal, NamedTuple, Self, Sequence, get_args
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
-from .base import _ClassWithInit, _PICMIModel, resolve_once
+from .base import _PICMIModel, PICMI_SolverExtension, resolve_once
 
 
 class _AxisGroup(NamedTuple):
@@ -1096,69 +1096,51 @@ class PICMI_ElectromagneticSolver(_PICMIModel):
     )
 
 
-class PICMI_ElectrostaticSolver(_ClassWithInit):
+_ElectrostaticSolverMethod = Literal["FFT", "Multigrid"]
+
+
+class PICMI_ElectrostaticSolver(_PICMIModel):
     """
     Electrostatic field solver
-
-    Parameters
-    ----------
-    grid: grid instance
-        Grid object for the diagnostic
-
-    method: string
-        One of 'FFT', or 'Multigrid'
-
-    required_precision: float, optional
-        Level of precision required for iterative solvers
-
-    maximum_iterations: integer, optional
-        Maximum number of iterations for iterative solvers
     """
 
-    methods_list = ["FFT", "Multigrid"]
+    # Retained for backwards compatibility reasons.
+    # The type annotation of `method` is the ground-truth.
+    methods_list: ClassVar[list[str]] = list(get_args(_ElectrostaticSolverMethod))
 
-    def __init__(
-        self, grid, method=None, required_precision=None, maximum_iterations=None, **kw
-    ):
-        assert method is None or method in PICMI_ElectrostaticSolver.methods_list, (
-            Exception(
-                "method must be one of "
-                + ", ".join(PICMI_ElectrostaticSolver.methods_list)
-            )
-        )
-
-        self.grid = grid
-        self.method = method
-        self.required_precision = required_precision
-        self.maximum_iterations = maximum_iterations
-
-        self.handle_init(kw)
+    grid: PICMI_AnyGrid = Field(description="Grid object for the diagnostic")
+    method: _ElectrostaticSolverMethod | None = Field(
+        default=None, description="One of 'FFT', or 'Multigrid'"
+    )
+    required_precision: float | None = Field(
+        default=None, description="Level of precision required for iterative solvers"
+    )
+    maximum_iterations: int | None = Field(
+        default=None, description="Maximum number of iterations for iterative solvers"
+    )
 
 
-class PICMI_MagnetostaticSolver(_ClassWithInit):
+_MagnetostaticSolverMethod = Literal["FFT", "Multigrid"]
+
+
+class PICMI_MagnetostaticSolver(_PICMIModel):
     """
     Magnetostatic field solver
-
-    Parameters
-    ----------
-    grid: grid instance
-        Grid object for the diagnostic
-
-    method: string
-        One of 'FFT', or 'Multigrid'
     """
 
-    methods_list = ["FFT", "Multigrid"]
+    # Retained for backwards compatibility reasons.
+    # The type annotation of `method` is the ground-truth.
+    methods_list: ClassVar[list[str]] = list(get_args(_MagnetostaticSolverMethod))
 
-    def __init__(self, grid, method=None, **kw):
-        assert method is None or method in PICMI_MagnetostaticSolver.methods_list, (
-            Exception(
-                "method must be one of "
-                + ", ".join(PICMI_MagnetostaticSolver.methods_list)
-            )
-        )
+    grid: PICMI_AnyGrid = Field(description="Grid object for the diagnostic")
+    method: _MagnetostaticSolverMethod | None = Field(
+        default=None, description="One of 'FFT', or 'Multigrid'"
+    )
 
-        self.grid = grid
-        self.method = method
 
-        self.handle_init(kw)
+PICMI_AnySolver = (
+    PICMI_ElectromagneticSolver
+    | PICMI_ElectrostaticSolver
+    | PICMI_MagnetostaticSolver
+    | PICMI_SolverExtension
+)

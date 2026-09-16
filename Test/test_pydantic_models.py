@@ -433,3 +433,191 @@ def test_load_checks_the_recorded_class():
     loaded = ExtendedCartesian3DGrid.model_validate(standard_grid.model_dump())
     assert type(loaded) is ExtendedCartesian3DGrid
     assert loaded.number_of_cells == [8, 8, 8]
+
+
+# --- Extensions: code-specific classes without a counterpart in the standard
+
+class CodeSolver(picmistandard.PICMI_SolverExtension):
+    """A code-specific field solver"""
+    grid: picmistandard.PICMI_AnyGrid
+    electron_temperature: float = Field(description="Electron temperature [eV]")
+
+
+class CodeDiagnostic(picmistandard.PICMI_DiagnosticExtension):
+    """A code-specific diagnostic"""
+    period: int
+
+
+def test_extensions_are_accepted_by_fields_of_their_kind_only():
+    grid = cartesian3d_grid_vectors()
+    solver = CodeSolver(grid=grid, electron_temperature=10.)
+    sim = picmi.Simulation(solver=solver)
+    assert sim.solver is solver
+    sim.add_diagnostic(CodeDiagnostic(period=5))
+
+    with pytest.raises(ValidationError):
+        sim.add_diagnostic(solver)
+    assert len(sim.diagnostics) == 1
+    with pytest.raises(ValidationError):
+        picmi.Simulation(solver=CodeDiagnostic(period=5))
+
+
+def test_extensions_validate_like_standard_classes():
+    grid = cartesian3d_grid_vectors()
+    with pytest.raises(ValidationError, match="electron_temperatur"):
+        CodeSolver(grid=grid, electron_temperatur=10.)
+    solver = CodeSolver(grid=grid, electron_temperature=10.)
+    with pytest.raises(ValidationError):
+        solver.electron_temperature = "hot"
+    assert solver.electron_temperature == 10.
+
+    loaded = picmi.Simulation.model_validate_json(picmi.Simulation(solver=solver).model_dump_json())
+    assert type(loaded.solver) is CodeSolver
+
+
+def test_extension_docstrings_are_not_inherited():
+    assert CodeSolver.__doc__ == "A code-specific field solver"
+    assert "code-specific classes" in picmistandard.PICMI_Extension.__doc__
+
+
+# --- Expressions
+
+def test_expression_parameters_are_collected():
+    flux = picmi.AnalyticFluxDistribution(
+        flux="flux0*exp(-t/tau)", flux_normal_axis="z", surface_flux_position=0., flux_direction=1,
+        flux0=1e20, tau=1e-9,
+    )
+    assert flux.user_defined_kw == {"flux0": 1e20, "tau": 1e-9}
+    with pytest.raises(ValidationError, match="unused"):
+        picmi.AnalyticFluxDistribution(
+            flux="1e20", flux_normal_axis="z", surface_flux_position=0., flux_direction=1, unused=1,
+        )
+
+    field = picmi.AnalyticAppliedField(Bz_expression="B0*z", B0=2.)
+    assert field.user_defined_kw == {"B0": 2.}
+
+    # numbers are accepted as expressions and line breaks are removed
+    uniform_flux = picmi.UniformFluxDistribution(
+        flux=1e20, flux_normal_axis="z", surface_flux_position=0., flux_direction=-1,
+    )
+    assert uniform_flux.flux == "1e+20"
+    assert picmi.AnalyticDistribution(density_expression="n0\n*2", n0=1.).density_expression == "n0*2"
+
+
+def test_expression_parameters_in_nested_expressions():
+    class CodeExternalFields(picmistandard.PICMI_AppliedFieldExtension, picmistandard.PICMI_ExpressionParameters):
+        _expression_fields = ("fields",)
+        fields: dict
+        user_defined_kw: dict = Field(default_factory=dict)
+
+    external = CodeExternalFields(fields={"coil": {"A_time_function": "sin(omega*t)", "read_from_file": False}}, omega=3.)
+    assert external.user_defined_kw == {"omega": 3.}
+
+
+# --- Distributions, species
+
+def test_particle_list_distribution_broadcasts_single_values():
+    distribution = picmi.ParticleListDistribution(x=[0., 1., 2.], ux=5., weight=2.)
+    assert distribution.y == [0., 0., 0.]
+    assert distribution.ux == [5., 5., 5.]
+    assert distribution.weight == 2.
+    with pytest.raises(ValidationError, match="Length of y"):
+        picmi.ParticleListDistribution(x=[0., 1., 2.], y=[0., 1.])
+
+
+def test_multi_species():
+    distribution = picmi.UniformDistribution(density=1e23)
+    multi = picmi.MultiSpecies(
+        particle_types="H", names=["H1", "H2"], charge_states=[1., 2.], proportions=[0.5, 0.5],
+        initial_distribution=distribution,
+    )
+    assert multi.nspecies == len(multi) == 2
+    assert [type(s) for s in multi.species_instances_list] == [picmi.Species, picmi.Species]
+    assert multi["H2"].charge_state == 2.
+    assert multi[0].particle_type == "H"
+    assert multi[0].initial_distribution is distribution
+    with pytest.raises(ValidationError, match="frozen"):
+        multi.names = ["a", "b"]
+    with pytest.raises(ValidationError, match="same length"):
+        picmi.MultiSpecies(names=["a", "b"], charge_states=[1., 2., 3.])
+
+    sim = picmi.Simulation()
+    sim.add_species(multi, layout=picmi.GriddedLayout(n_macroparticles_per_cell=[1, 1, 1]))
+    assert sim.species == [multi]
+
+
+def test_field_ionization_references_species():
+    ions = picmi.Species(particle_type="N", charge_state=2, name="ions")
+    electrons = picmi.Species(particle_type="electron", name="electrons")
+    ionization = picmi.FieldIonization(model="ADK", ionized_species=ions, product_species=electrons)
+    assert ionization.ionized_species is ions
+    sim = picmi.Simulation()
+    sim.add_interaction(ionization)
+    ions.interactions = [ionization]
+    with pytest.raises(ValidationError):
+        picmi.FieldIonization(model="ADK", ionized_species=grid_for_errors(), product_species=electrons)
+
+
+def grid_for_errors():
+    return cartesian3d_grid_vectors()
+
+
+# --- Lasers, applied fields, solvers
+
+def test_analytic_laser_amplitudes():
+    laser = picmi.AnalyticLaser(
+        field_expression="E0*sin(k0*t)", wavelength=8e-7,
+        propagation_direction=[0., 0., 1.], polarization_direction=[1., 0., 0.],
+        amax=1., E0=2., k0=3.,
+    )
+    assert laser.Emax == pytest.approx(e0_for_a0_1(8e-7))
+    assert laser.user_defined_kw == {"E0": 2., "k0": 3.}
+    laser.wavelength = 1e-6
+    assert laser.amax == 1.
+    assert laser.Emax == pytest.approx(e0_for_a0_1(1e-6))
+    with pytest.raises(ValidationError, match="One of Emax or amax"):
+        picmi.AnalyticLaser(field_expression="0", wavelength=8e-7,
+                            propagation_direction=[0., 0., 1.], polarization_direction=[1., 0., 0.])
+
+
+def test_mirror_requires_one_front_location():
+    picmi.Mirror(z_front_location=0.1)
+    with pytest.raises(ValidationError, match="only one"):
+        picmi.Mirror(x_front_location=0.1, z_front_location=0.1)
+
+
+def test_electrostatic_solver_method():
+    assert picmistandard.PICMI_ElectrostaticSolver.methods_list == ["FFT", "Multigrid"]
+    picmi.ElectrostaticSolver(grid=cartesian3d_grid_vectors(), method="Multigrid")
+    with pytest.raises(ValidationError):
+        picmi.ElectrostaticSolver(grid=cartesian3d_grid_vectors(), method="Jacobi")
+
+
+# --- Simulation
+
+def test_simulation_add_methods_validate_and_are_atomic():
+    sim = picmi.Simulation()
+    electrons = picmi.Species(particle_type="electron", name="electrons")
+    with pytest.raises(ValidationError):
+        sim.add_species(electrons, layout="not a layout")
+    assert sim.species == [] and sim.layouts == [] and sim.initialize_self_fields == []
+
+    sim.add_species(electrons, layout=None, initialize_self_field=True)
+    assert sim.species == [electrons]
+    assert sim.initialize_self_fields == [True]
+
+    with pytest.raises(ValidationError):
+        sim.add_laser(electrons, picmi.LaserAntenna(position=[0., 0., 0.]))
+    assert sim.lasers == [] and sim.laser_injection_methods == []
+
+
+def test_unsupported_and_deprecated_argument_helpers():
+    species = picmi.Species(particle_type="electron", density_scale=2.)
+    with pytest.warns(UserWarning, match="Species: The argument density_scale is not supported"):
+        species._check_unsupported_argument("density_scale")
+    with pytest.raises(Exception, match="is deprecated"):
+        species._check_deprecated_argument("density_scale", raise_error=True)
+    # arguments with their default value are not reported
+    species._check_unsupported_argument("charge", raise_error=True)
+    with pytest.raises(Exception, match="the value Boris is not supported"):
+        picmi.Species(particle_type="electron", method="Boris")._unsupported_value("method")
