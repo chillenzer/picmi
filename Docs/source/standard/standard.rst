@@ -49,3 +49,11 @@ Extensions
    :maxdepth: 1
 
    extensions
+
+Types
+-----
+
+.. toctree::
+   :maxdepth: 1
+
+   types

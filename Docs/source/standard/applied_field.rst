@@ -22,3 +22,12 @@ Refecting mirrors
 
 .. autopydantic_model:: picmistandard.PICMI_Mirror
     :inherited-members: BaseModel
+
+Fields from files
+-----------------
+
+.. autopydantic_model:: picmistandard.PICMI_LoadAppliedField
+    :inherited-members: BaseModel
+
+.. autopydantic_model:: picmistandard.PICMI_LoadGriddedField
+    :inherited-members: BaseModel

@@ -340,8 +340,8 @@ class PICMI_Cartesian1DGrid(_PICMIGrid):
         lo, hi : list of float
             The lower (lo) and upper (hi) corner of the region, each a vector of length 1
 
-        refinement_factor : list of int, default [2]
-            The refinement factor relative to the next lower level
+        refinement_factor : list of int, optional
+            The refinement factor relative to the next lower level (default: [2])
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
@@ -565,8 +565,8 @@ class PICMI_CylindricalGrid(_PICMIGrid):
         lo, hi : list of float
             The lower (lo) and upper (hi) corner of the region, each a vector of length 2
 
-        refinement_factor : list of int, default [2, 2]
-            The refinement factor relative to the next lower level
+        refinement_factor : list of int, optional
+            The refinement factor relative to the next lower level (default: [2, 2])
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
@@ -785,8 +785,8 @@ class PICMI_Cartesian2DGrid(_PICMIGrid):
         lo, hi : list of float
             The lower (lo) and upper (hi) corner of the region, each a vector of length 2
 
-        refinement_factor : list of int, default [2, 2]
-            The refinement factor relative to the next lower level
+        refinement_factor : list of int, optional
+            The refinement factor relative to the next lower level (default: [2, 2])
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
@@ -1047,8 +1047,8 @@ class PICMI_Cartesian3DGrid(_PICMIGrid):
         lo, hi : list of float
             The lower (lo) and upper (hi) corner of the region, each a vector of length 3
 
-        refinement_factor : list of int, default [2, 2, 2]
-            The refinement factor relative to the next lower level
+        refinement_factor : list of int, optional
+            The refinement factor relative to the next lower level (default: [2, 2, 2])
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]

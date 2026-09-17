@@ -4,11 +4,10 @@ The classes in the file are all particle related
 """
 
 import numbers
-from functools import partial
-from typing import Annotated, ClassVar, Literal, Self
+from typing import ClassVar, Literal, Self
 
 import numpy as np
-from pydantic import AfterValidator, Field, PrivateAttr, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 
 from .base import (
     Expression,
@@ -394,7 +393,7 @@ class PICMI_GriddedLayout(_PICMIModel):
     """
     Specifies a gridded layout of particles
     """
-    n_macroparticles_per_cell: Annotated[list[int], AfterValidator(partial(broadcast_validation, condition=lambda v: v>=0, message="All n_macroparticle_per_cell must be greater than or equal to 0."))] = Field(
+    n_macroparticles_per_cell: list[int] = Field(
         min_length=1, max_length=3,
         description="Number of particles per cell along each axis (one entry per grid dimension, or a single number in 1D)"
     )
@@ -422,6 +421,16 @@ class PICMI_GriddedLayout(_PICMIModel):
         if isinstance(value, numbers.Number) and not isinstance(value, bool):
             return [value]
         return value
+
+    # A validator of the field, instead of one in an Annotated type, which the documentation
+    # would show as the type.
+    @field_validator("n_macroparticles_per_cell", mode="after")
+    @classmethod
+    def _not_negative(cls, value):
+        return broadcast_validation(
+            value, condition=lambda v: v >= 0,
+            message="All n_macroparticle_per_cell must be greater than or equal to 0.",
+        )
 
     @property
     def n_macroparticle_per_cell(self):

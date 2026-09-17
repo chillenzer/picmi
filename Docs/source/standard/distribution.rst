@@ -11,6 +11,9 @@ Particle distributions
 .. autopydantic_model:: picmistandard.PICMI_UniformDistribution
     :inherited-members: BaseModel
 
+.. autopydantic_model:: picmistandard.PICMI_FoilDistribution
+    :inherited-members: BaseModel
+
 .. autopydantic_model:: picmistandard.PICMI_UniformFluxDistribution
     :inherited-members: BaseModel
 
@@ -24,4 +27,7 @@ Particle distributions
     :inherited-members: BaseModel
 
 .. autopydantic_model:: picmistandard.PICMI_FromFileDistribution
+    :inherited-members: BaseModel
+
+.. autopydantic_model:: picmistandard.PICMI_ParticleDistributionPlanarInjector
     :inherited-members: BaseModel

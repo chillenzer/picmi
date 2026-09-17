@@ -40,6 +40,7 @@ release = ''
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
+    'sphinx.ext.intersphinx',
     'sphinx.ext.napoleon',
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
@@ -47,6 +48,8 @@ extensions = [
     'sphinxcontrib.autodoc_pydantic',
 ]
 autodoc_member_order = 'bysource'
+# Link the types in the parameters of methods (numpydoc), e.g., "bool, optional"
+napoleon_preprocess_types = True
 # Document members (incl. pydantic fields) so the auto-generated parameter list
 # (from each Field(description=...)) is rendered for every documented class.
 # ``undoc-members`` is required because pydantic fields carry no __doc__ (their text
@@ -100,7 +103,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -201,8 +204,8 @@ texinfo_documents = [
 
 # -- Options for intersphinx extension ---------------------------------------
 
-# Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {'https://docs.python.org/': None}
+# Link types of the Python standard library, e.g., int or list.
+intersphinx_mapping = {'python': ('https://docs.python.org/3', None)}
 
 # -- Options for todo extension ----------------------------------------------
 
@@ -222,6 +225,10 @@ def setup(app):
        of ``extension: ClassVar[Any] = <... object>``.
     3. Name the unions of the PICMI classes of a kind in the types, e.g.,
        ``PICMI_AnySolver | None`` instead of listing all solver classes.
+
+    The unions and named type aliases (e.g., ``Expression``), which are documented with
+    ``autodata`` as targets of these types, have no docstrings of their own: document the
+    classes of a union, and the docstring that follows the definition of a type alias.
 
     Parameters are shown with their user-facing name, i.e., their alias (e.g., a
     code-specific ``<code>_<name>``) instead of their field name (``<name>``). Also use
@@ -357,7 +364,53 @@ def setup(app):
                     entry = entry[: -len(name)] + alias
             return entry
 
+    from sphinx.pycode import ModuleAnalyzer
+    from typing_extensions import TypeAliasType
+
+    def class_reference(cls):
+        name = cls.__name__
+        if getattr(picmistandard, name, None) is not cls:
+            name = f"{cls.__module__}.{cls.__qualname__}"
+        else:
+            name = f"picmistandard.{name}"
+        return f":class:`~{name}`"
+
+    def document_named_types(app, what, name, obj, options, lines):
+        if what != "data":
+            return
+        attribute = name.rsplit(".", 1)[-1]
+        if isinstance(obj, types.UnionType) and attribute.startswith("PICMI_Any"):
+            lines[:] = ["Any of the classes:", ""] + [
+                f"- {class_reference(member)}" for member in obj.__args__
+            ]
+        elif isinstance(obj, TypeAliasType):
+            docs = ModuleAnalyzer.for_module(obj.__module__).find_attr_docs()
+            lines[:] = list(docs.get(("", attribute), []))
+
+    # Types refer to classes, which the documented unions and type aliases are not: resolve these
+    # references to them, too.
+    named_types = {
+        name
+        for name, value in vars(picmistandard).items()
+        if (name.startswith("PICMI_Any") and isinstance(value, types.UnionType))
+        or isinstance(value, TypeAliasType)
+    }
+
+    def resolve_named_types(app, env, node, contnode):
+        target = node.get("reftarget", "")
+        if (
+            node.get("refdomain") == "py"
+            and node.get("reftype") == "class"
+            and target.rsplit(".", 1)[-1] in named_types
+        ):
+            return env.get_domain("py").resolve_xref(
+                env, node["refdoc"], app.builder, "obj", target, node, contnode
+            )
+        return None
+
     app.setup_extension("sphinxcontrib.autodoc_pydantic")
+    app.connect("autodoc-process-docstring", document_named_types)
+    app.connect("missing-reference", resolve_named_types)
     app.add_autodocumenter(GroupedPydanticModelDocumenter, override=True)
     app.add_directive_to_domain(
         "py", "pydantic_field", UserFacingNamePydanticField, override=True

@@ -11,6 +11,9 @@ Standard PIC diagnostics
 .. autopydantic_model:: picmistandard.PICMI_ParticleDiagnostic
     :inherited-members: BaseModel
 
+.. autopydantic_model:: picmistandard.PICMI_ParticleBoundaryScrapingDiagnostic
+    :inherited-members: BaseModel
+
 .. autopydantic_model:: picmistandard.PICMI_FieldDiagnostic
     :inherited-members: BaseModel
 
