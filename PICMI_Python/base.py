@@ -29,6 +29,9 @@ def resolve_once(validator):
     derived-field assignments do not re-execute its body. The outermost call still runs in
     full, so derived fields are computed/resolved exactly once per validation.
 
+    The fields that the validator derives are not marked as set (``model_fields_set``), so
+    that dumps with ``exclude_unset=True`` contain only the parameters that were given.
+
     Apply it *under* ``@model_validator(mode="after")``::
 
         @model_validator(mode="after")
@@ -43,10 +46,12 @@ def resolve_once(validator):
         if marker in active:
             return self
         active.add(marker)
+        fields_set = set(self.__pydantic_fields_set__)
         try:
             return validator(self)
         finally:
             active.discard(marker)
+            object.__setattr__(self, "__pydantic_fields_set__", fields_set)
     return wrapper
 
 codename = None
@@ -447,7 +452,9 @@ class PICMI_ExpressionParameters(_PICMIModel):
                 continue
             if any(re.search(r'\b%s\b' % re.escape(key), expression) for expression in expressions):
                 user_defined_kw[key] = data.pop(key)
-        data[user_defined_kw_key] = user_defined_kw
+        # only set it if given or collected, so that the field is not marked as set otherwise
+        if user_defined_kw or user_defined_kw_key in data:
+            data[user_defined_kw_key] = user_defined_kw
         return data
 
 

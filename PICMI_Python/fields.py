@@ -335,7 +335,8 @@ class PICMI_Cartesian1DGrid(_PICMIGrid):
         lo, hi: vectors of length 2 specifying the extent of the region
         refinement_factor: defaulting to [2,2] (relative to next lower level)
         """
-        self.refined_regions.append([level, lo, hi, refinement_factor])
+        # assign (instead of appending in place), so that the region is validated and marked as set
+        self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
 
 
 class PICMI_CylindricalGrid(_PICMIGrid):
@@ -551,7 +552,8 @@ class PICMI_CylindricalGrid(_PICMIGrid):
         lo, hi: vectors of length 2 specifying the extent of the region
         refinement_factor: defaulting to [2,2] (relative to next lower level)
         """
-        self.refined_regions.append([level, lo, hi, refinement_factor])
+        # assign (instead of appending in place), so that the region is validated and marked as set
+        self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
 
 
 class PICMI_Cartesian2DGrid(_PICMIGrid):
@@ -762,7 +764,8 @@ class PICMI_Cartesian2DGrid(_PICMIGrid):
         lo, hi: vectors of length 2 specifying the extent of the region
         refinement_factor: defaulting to [2,2] (relative to next lower level)
         """
-        self.refined_regions.append([level, lo, hi, refinement_factor])
+        # assign (instead of appending in place), so that the region is validated and marked as set
+        self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
 
 
 class PICMI_Cartesian3DGrid(_PICMIGrid):
@@ -1023,7 +1026,8 @@ class PICMI_Cartesian3DGrid(_PICMIGrid):
         refinement_factor: vector of integers, optional
             Defaulting to [2,2,2] (relative to next lower level)
         """
-        self.refined_regions.append([level, lo, hi, refinement_factor])
+        # assign (instead of appending in place), so that the region is validated and marked as set
+        self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
 
 
 PICMI_AnyGrid = (

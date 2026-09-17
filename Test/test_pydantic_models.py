@@ -534,6 +534,50 @@ def test_load_helper_uses_the_recorded_class():
         picmistandard.load('{"picmi_class": "unknown.module.Grid"}')
 
 
+def test_dumps_of_the_given_parameters_only():
+    # parameters that validators derive are not marked as set
+    grid = cartesian3d_grid_per_axis()
+    given = {
+        "nx", "ny", "nz", "xmin", "xmax", "ymin", "ymax", "zmin", "zmax",
+        "bc_xmin", "bc_xmax", "bc_ymin", "bc_ymax", "bc_zmin", "bc_zmax",
+    }
+    assert grid.model_fields_set == given
+    grid.nx = 16
+    grid.lower_bound = [-1., 0., 0.]
+    assert grid.model_fields_set == given | {"lower_bound"}
+    assert grid.number_of_cells == [16, 8, 8] and grid.xmin == -1.
+    with pytest.raises(ValidationError):
+        grid.upper_bound = "not a vector"
+    assert grid.model_fields_set == given | {"lower_bound"}
+
+    vectors = cartesian3d_grid_vectors(xmin_particles=0.5)
+    assert vectors.model_fields_set == {
+        "number_of_cells", "lower_bound", "upper_bound",
+        "lower_boundary_conditions", "upper_boundary_conditions", "xmin_particles",
+    }
+
+    laser = gaussian_laser(a0=1.)
+    assert "a0" in laser.model_fields_set and "E0" not in laser.model_fields_set
+    laser.wavelength = 4e-7
+
+    vectors.add_refined_region(1, [0.2, 0.2, 0.2], [0.8, 0.8, 0.8])
+    assert "refined_regions" in vectors.model_fields_set
+
+    distribution = picmi.ParticleListDistribution(x=[0., 1.], ux=5., weight=2.)
+    assert distribution.model_fields_set == {"x", "ux", "weight"}
+    analytic = picmi.AnalyticDistribution(density_expression="1e20")
+    assert analytic.model_fields_set == {"density_expression"}
+
+    # and dumps of the given parameters load as the same objects
+    objects = (
+        grid, vectors, laser, distribution, analytic,
+        picmi.AnalyticDistribution(density_expression="n0", n0=1.), extended_simulation(),
+    )
+    for obj in objects:
+        loaded = picmistandard.load(obj.model_dump_json(exclude_unset=True, by_alias=True))
+        assert loaded.model_dump() == obj.model_dump()
+
+
 # --- Extensions: code-specific classes without a counterpart in the standard
 
 class CodeSolver(picmistandard.PICMI_SolverExtension):
