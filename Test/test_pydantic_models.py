@@ -162,6 +162,28 @@ def test_grid_per_axis_and_vector_forms_stay_in_sync():
     assert grid.number_of_cells == [16, 16, 32]
 
 
+def test_grid_boundary_conditions_can_be_none():
+    grid = picmi.Cartesian3DGrid(
+        number_of_cells=[8, 8, 8], lower_bound=[0., 0., 0.], upper_bound=[1., 1., 1.],
+        lower_boundary_conditions=[None, "periodic", "periodic"],
+        upper_boundary_conditions=["none", "periodic", "periodic"],
+    )
+    assert grid.lower_boundary_conditions == [None, "periodic", "periodic"]
+    assert grid.bc_xmin is None and grid.bc_xmax == "none"
+    assert grid.lower_boundary_conditions_particles == [None, "periodic", "periodic"]
+    grid.bc_xmin = "open"
+    assert grid.lower_boundary_conditions == ["open", "periodic", "periodic"]
+    assert grid.lower_boundary_conditions_particles == ["open", "periodic", "periodic"]
+
+    for grid_class, dims in ((picmi.Cartesian1DGrid, 1), (picmi.Cartesian2DGrid, 2), (picmi.CylindricalGrid, 2)):
+        grid = grid_class(
+            number_of_cells=[8] * dims, lower_bound=[0.] * dims, upper_bound=[1.] * dims,
+            lower_boundary_conditions=[None] * dims, upper_boundary_conditions=[None] * dims,
+            lower_boundary_conditions_particles=[None] * dims, upper_boundary_conditions_particles=[None] * dims,
+        )
+        assert grid.upper_boundary_conditions == grid.upper_boundary_conditions_particles == [None] * dims
+
+
 def test_grid_particle_boundaries_follow_field_boundaries():
     grid = cartesian3d_grid_vectors(zmax_particles=0.5)
     assert grid.upper_bound_particles == [1., 1., 0.5]
@@ -286,6 +308,16 @@ def test_gridded_layout_missing_argument():
     with pytest.raises(ValidationError) as excinfo:
         picmi.GriddedLayout()
     assert excinfo.value.errors()[0]["type"] == "missing"
+
+
+def test_gridded_layout_single_number_of_macroparticles():
+    assert picmi.GriddedLayout(n_macroparticles_per_cell=4).n_macroparticles_per_cell == [4]
+    layout = picmi.GriddedLayout(n_macroparticle_per_cell=2)
+    assert layout.n_macroparticles_per_cell == [2]
+    layout.n_macroparticle_per_cell = 3
+    assert layout.n_macroparticles_per_cell == [3]
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        picmi.GriddedLayout(n_macroparticles_per_cell=-1)
 
 
 def test_pseudo_random_layout_requires_one_number_of_macroparticles():
@@ -483,6 +515,25 @@ def test_load_checks_the_recorded_class():
     assert loaded.number_of_cells == [8, 8, 8]
 
 
+def test_load_helper_uses_the_recorded_class():
+    sim = extended_simulation()
+    dump = sim.model_dump_json(by_alias=True)
+    for data in (dump, dump.encode()):
+        loaded = picmistandard.load(data)
+        assert type(loaded) is picmi.Simulation
+        assert type(loaded.solver) is ExtendedElectromagneticSolver
+        assert loaded.model_dump_json(by_alias=True) == dump
+
+    grid = picmistandard.load(sim.solver.grid.model_dump())
+    assert type(grid) is ExtendedCartesian3DGrid
+    assert grid.max_grid_size == 16
+
+    with pytest.raises(ValueError, match="does not record the class"):
+        picmistandard.load({"number_of_cells": [8, 8, 8]})
+    with pytest.raises(ValueError, match="Unknown picmi_class 'unknown.module.Grid'"):
+        picmistandard.load('{"picmi_class": "unknown.module.Grid"}')
+
+
 # --- Extensions: code-specific classes without a counterpart in the standard
 
 class CodeSolver(picmistandard.PICMI_SolverExtension):
@@ -564,6 +615,30 @@ def test_expression_parameters_in_nested_expressions():
 
 # --- Distributions, species
 
+def test_expression_parameters_named_like_fields_that_are_not_used():
+    class TypedExpression(picmistandard.PICMI_ExpressionParameters):
+        """An object whose ``scale`` parameter is only used by the "scaled" kind"""
+        _expression_fields = ("expression",)
+        kind: str
+        expression: picmistandard.Expression
+        scale: int | None = None
+        user_defined_kw: dict = Field(default_factory=dict)
+
+        @classmethod
+        def _parameter_names(cls, data):
+            names = super()._parameter_names(data)
+            if data.get("kind") != "scaled" and data.get("scale") is not None:
+                names.discard("scale")
+            return names
+
+    typed = TypedExpression(kind="plain", expression="x/scale", scale=1e-6)
+    assert typed.scale is None
+    assert typed.user_defined_kw == {"scale": 1e-6}
+    assert TypedExpression.model_validate_json(typed.model_dump_json()).user_defined_kw == {"scale": 1e-6}
+    with pytest.raises(ValidationError, match="scale"):
+        TypedExpression(kind="scaled", expression="x/scale", scale=1e-6)
+
+
 def test_particle_list_distribution_broadcasts_single_values():
     distribution = picmi.ParticleListDistribution(x=[0., 1., 2.], ux=5., weight=2.)
     assert distribution.y == [0., 0., 0.]
@@ -592,6 +667,18 @@ def test_multi_species():
     sim = picmi.Simulation()
     sim.add_species(multi, layout=picmi.GriddedLayout(n_macroparticles_per_cell=[1, 1, 1]))
     assert sim.species == [multi]
+
+
+def test_particle_diagnostics_accept_multi_species():
+    multi = picmi.MultiSpecies(particle_types="H", names=["H1", "H2"], charge_states=[1., 2.])
+    electrons = picmi.Species(particle_type="electron", name="electrons")
+    assert picmi.ParticleDiagnostic(period=1, species=multi).species is multi
+    assert picmi.ParticleDiagnostic(period=1, species=[multi, electrons]).species == [multi, electrons]
+    assert picmi.ParticleBoundaryScrapingDiagnostic(period=1, species=multi).species is multi
+    lab_frame = picmi.LabFrameParticleDiagnostic(
+        grid=cartesian3d_grid_vectors(), num_snapshots=1, dt_snapshots=1., species=multi,
+    )
+    assert lab_frame.species is multi
 
 
 def test_field_ionization_references_species():

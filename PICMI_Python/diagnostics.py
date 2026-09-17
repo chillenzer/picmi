@@ -7,7 +7,7 @@ from pydantic import Field
 
 from .base import PICMI_DiagnosticExtension, _PICMIModel
 from .fields import PICMI_AnyGrid
-from .particles import PICMI_Species
+from .particles import PICMI_AnySpecies
 
 # ----------------------------
 # Simulation frame diagnostics
@@ -117,9 +117,9 @@ class PICMI_ParticleDiagnostic(_PICMIModel):
     period: int = Field(
         description="Period of time steps that the diagnostic is performed"
     )
-    species: PICMI_Species | list[PICMI_Species] | None = Field(
+    species: PICMI_AnySpecies | list[PICMI_AnySpecies] | None = Field(
         default=None,
-        description="Species instance or list of species instances to write out. If not specified, all species are written. Note that the name attribute must be defined for the species."
+        description="Species instance (or MultiSpecies instance) or list of them to write out. If not specified, all species are written. Note that the name attribute must be defined for the species."
     )
     data_list: list[str] | None = Field(
         default=None,
@@ -154,9 +154,9 @@ class PICMI_ParticleBoundaryScrapingDiagnostic(_PICMIModel):
     period: int = Field(
         description="Period of time steps that the diagnostic is performed"
     )
-    species: PICMI_Species | list[PICMI_Species] | None = Field(
+    species: PICMI_AnySpecies | list[PICMI_AnySpecies] | None = Field(
         default=None,
-        description="Species instance or list of species instances to write out. If not specified, all species are written. Note that the name attribute must be defined for the species."
+        description="Species instance (or MultiSpecies instance) or list of them to write out. If not specified, all species are written. Note that the name attribute must be defined for the species."
     )
     data_list: list[str] | None = Field(
         default=None,
@@ -241,9 +241,9 @@ class PICMI_LabFrameParticleDiagnostic(_PICMIModel):
         default=0.,
         description="Time for the first snapshot in lab frame"
     )
-    species: PICMI_Species | list[PICMI_Species] | None = Field(
+    species: PICMI_AnySpecies | list[PICMI_AnySpecies] | None = Field(
         default=None,
-        description="Species instance or list of species instances to write out. If not specified, all species are written. Note that the name attribute must be defined for the species."
+        description="Species instance (or MultiSpecies instance) or list of them to write out. If not specified, all species are written. Note that the name attribute must be defined for the species."
     )
     write_dir: str | None = Field(
         default=None,

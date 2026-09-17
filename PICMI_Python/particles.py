@@ -3,6 +3,7 @@ These should be the base classes for Python implementation of the PICMI standard
 The classes in the file are all particle related
 """
 
+import numbers
 from functools import partial
 from typing import Annotated, ClassVar, Literal, Self
 
@@ -395,7 +396,7 @@ class PICMI_GriddedLayout(_PICMIModel):
     """
     n_macroparticles_per_cell: Annotated[list[int], AfterValidator(partial(broadcast_validation, condition=lambda v: v>=0, message="All n_macroparticle_per_cell must be greater than or equal to 0."))] = Field(
         min_length=1, max_length=3,
-        description="Number of particles per cell along each axis (one entry per grid dimension)"
+        description="Number of particles per cell along each axis (one entry per grid dimension, or a single number in 1D)"
     )
     grid: PICMI_AnyGrid | None = Field(
         default=None,
@@ -413,6 +414,14 @@ class PICMI_GriddedLayout(_PICMIModel):
         if "n_macroparticle_per_cell" in kwargs:
             kwargs["n_macroparticles_per_cell"] = kwargs.pop("n_macroparticle_per_cell")
         return super().__init__(*args, **kwargs)
+
+    @field_validator("n_macroparticles_per_cell", mode="before")
+    @classmethod
+    def _single_number_as_list(cls, value):
+        # e.g., in 1D
+        if isinstance(value, numbers.Number) and not isinstance(value, bool):
+            return [value]
+        return value
 
     @property
     def n_macroparticle_per_cell(self):

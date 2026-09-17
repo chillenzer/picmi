@@ -197,11 +197,11 @@ class PICMI_Cartesian1DGrid(_PICMIGrid):
     upper_bound: list[float] | None = Field(
         default=None, description="Position of the node at the upper bound [m]"
     )
-    lower_boundary_conditions: list[str] | None = Field(
+    lower_boundary_conditions: list[str | None] | None = Field(
         default=None,
         description="Conditions at lower boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
-    upper_boundary_conditions: list[str] | None = Field(
+    upper_boundary_conditions: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
@@ -242,11 +242,11 @@ class PICMI_Cartesian1DGrid(_PICMIGrid):
     xmax_particles: float | None = Field(
         default=None, description="Position of max particle boundary along X [m]"
     )
-    lower_boundary_conditions_particles: list[str] | None = Field(
+    lower_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at lower boundaries for particles, periodic, absorbing, reflect or thermal",
     )
-    upper_boundary_conditions_particles: list[str] | None = Field(
+    upper_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries for particles, periodic, absorbing, reflect or thermal",
     )
@@ -381,7 +381,7 @@ class PICMI_CylindricalGrid(_PICMIGrid):
         default=None,
         description="Conditions at lower boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
-    upper_boundary_conditions: list[str] | None = Field(
+    upper_boundary_conditions: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
@@ -453,7 +453,7 @@ class PICMI_CylindricalGrid(_PICMIGrid):
         default=None,
         description="Conditions at lower boundaries for particles, periodic, absorbing, reflect or thermal",
     )
-    upper_boundary_conditions_particles: list[str] | None = Field(
+    upper_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries for particles, periodic, absorbing, reflect or thermal",
     )
@@ -593,11 +593,11 @@ class PICMI_Cartesian2DGrid(_PICMIGrid):
     upper_bound: list[float] | None = Field(
         default=None, description="Position of the node at the upper bound [m]"
     )
-    lower_boundary_conditions: list[str] | None = Field(
+    lower_boundary_conditions: list[str | None] | None = Field(
         default=None,
         description="Conditions at lower boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
-    upper_boundary_conditions: list[str] | None = Field(
+    upper_boundary_conditions: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
@@ -661,11 +661,11 @@ class PICMI_Cartesian2DGrid(_PICMIGrid):
     ymax_particles: float | None = Field(
         default=None, description="Position of max particle boundary along Y [m]"
     )
-    lower_boundary_conditions_particles: list[str] | None = Field(
+    lower_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at lower boundaries for particles, periodic, absorbing, reflect or thermal",
     )
-    upper_boundary_conditions_particles: list[str] | None = Field(
+    upper_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries for particles, periodic, absorbing, reflect or thermal",
     )
@@ -804,11 +804,11 @@ class PICMI_Cartesian3DGrid(_PICMIGrid):
     upper_bound: list[float] | None = Field(
         default=None, description="Position of the node at the upper bound [m]"
     )
-    lower_boundary_conditions: list[str] | None = Field(
+    lower_boundary_conditions: list[str | None] | None = Field(
         default=None,
         description="Conditions at lower boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
-    upper_boundary_conditions: list[str] | None = Field(
+    upper_boundary_conditions: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries, periodic, open, dirichlet, absorbing_silver_mueller, or neumann",
     )
@@ -895,11 +895,11 @@ class PICMI_Cartesian3DGrid(_PICMIGrid):
     zmax_particles: float | None = Field(
         default=None, description="Position of max particle boundary along Z [m]"
     )
-    lower_boundary_conditions_particles: list[str] | None = Field(
+    lower_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at lower boundaries for particles, periodic, absorbing, reflect or thermal",
     )
-    upper_boundary_conditions_particles: list[str] | None = Field(
+    upper_boundary_conditions_particles: list[str | None] | None = Field(
         default=None,
         description="Conditions at upper boundaries for particles, periodic, absorbing, reflect or thermal",
     )

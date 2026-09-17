@@ -2,6 +2,7 @@
 """
 import contextlib
 import functools
+import json
 import numbers
 import re
 import threading
@@ -126,6 +127,25 @@ def _registered_picmi_class(name):
         raise ValueError(
             f"Unknown {PICMI_CLASS_KEY} '{name}'. Import the module that defines this class before loading the data."
         ) from None
+
+
+def load(data):
+    """Load a PICMI object as the class that it was dumped from
+
+    Parameters
+    ----------
+    data: str, bytes or dict
+        The JSON of the object (from ``model_dump_json``) or its dictionary (from ``model_dump``).
+
+    The module that defines the class, e.g., of the implementing code, must be imported before.
+    """
+    parsed = json.loads(data) if isinstance(data, (str, bytes, bytearray)) else data
+    if not isinstance(parsed, dict) or PICMI_CLASS_KEY not in parsed:
+        raise ValueError(f"The data does not record the class of a PICMI object ({PICMI_CLASS_KEY}).")
+    picmi_class = _registered_picmi_class(parsed[PICMI_CLASS_KEY])
+    if parsed is data:
+        return picmi_class.model_validate(data)
+    return picmi_class.model_validate_json(data)
 
 
 def _instantiate_picmi_objects(value):
@@ -382,12 +402,24 @@ class PICMI_ExpressionParameters(_PICMIModel):
     defined.
 
     Derived classes list the names of their fields that hold expressions (strings, possibly
-    nested in lists or dictionaries) in ``_expression_fields``.
+    nested in lists or dictionaries) in ``_expression_fields``. Keyword arguments named like a
+    field are not collected, unless a derived class excludes that field in ``_parameter_names``.
     """
 
     __picmi_doc_not_inherited__ = True
 
     _expression_fields: ClassVar[tuple[str, ...]] = ()
+
+    @classmethod
+    def _parameter_names(cls, data):
+        """The names (and aliases) of the fields that the given input data sets as parameters
+
+        Keyword arguments with these names are never collected into ``user_defined_kw``. These
+        are all fields, unless a derived class excludes fields that the input does not use, e.g.,
+        fields that only apply to other types of an object.
+        """
+        fields = cls.model_fields
+        return set(fields) | {field.alias for field in fields.values() if field.alias}
 
     @model_validator(mode="before")
     @classmethod
@@ -397,7 +429,7 @@ class PICMI_ExpressionParameters(_PICMIModel):
         data = dict(data)
 
         fields = cls.model_fields
-        known = set(fields) | {field.alias for field in fields.values() if field.alias}
+        known = cls._parameter_names(data)
         expressions = [
             expression
             for name in cls._expression_fields

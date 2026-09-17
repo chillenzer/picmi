@@ -158,11 +158,11 @@ class PICMI_GaussianLaser(_PICMILaser):
     )
     a0: float | None = Field(
         default=None,
-        description="Normalized vector potential at focus. Specify either a0 or E0 (E0 takes precedence)."
+        description="Normalized vector potential at focus. Specify either a0 or E0 (if both are given, they must be consistent)."
     )
     E0: float | None = Field(
         default=None,
-        description="Maximum amplitude of the laser field [V/m]. Specify either a0 or E0 (E0 takes precedence)."
+        description="Maximum amplitude of the laser field [V/m]. Specify either a0 or E0 (if both are given, they must be consistent)."
     )
     phi0: float | None = Field(
         default=None,
@@ -213,11 +213,11 @@ class PICMI_AnalyticLaser(_PICMILaser, PICMI_ExpressionParameters):
     )
     amax: float | None = Field(
         default=None,
-        description="Maximum normalized vector potential. Specify either amax or Emax (Emax takes precedence). This should be built into the expression, but some codes require a specified value for numerical purposes."
+        description="Maximum normalized vector potential. Specify either amax or Emax (if both are given, they must be consistent). This should be built into the expression, but some codes require a specified value for numerical purposes."
     )
     Emax: float | None = Field(
         default=None,
-        description="Maximum amplitude of the laser field [V/m]. Specify either amax or Emax (Emax takes precedence). This should be built into the expression, but some codes require a specified value for numerical purposes."
+        description="Maximum amplitude of the laser field [V/m]. Specify either amax or Emax (if both are given, they must be consistent). This should be built into the expression, but some codes require a specified value for numerical purposes."
     )
     name: str | None = Field(
         default=None,
