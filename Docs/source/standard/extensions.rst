@@ -5,24 +5,34 @@ Implementing codes can provide classes that have no counterpart in the standard,
 They derive these classes from the extension class of the respective kind, so that the objects are accepted by the PICMI classes where objects of that kind are expected.
 Classes that are only used by other code-specific classes derive from ``PICMI_Extension`` directly.
 
-.. autoclass:: picmistandard.PICMI_Extension
+.. autopydantic_model:: picmistandard.PICMI_Extension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_SolverExtension
+.. autopydantic_model:: picmistandard.PICMI_SolverExtension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_DistributionExtension
+.. autopydantic_model:: picmistandard.PICMI_DistributionExtension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_LayoutExtension
+.. autopydantic_model:: picmistandard.PICMI_LayoutExtension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_LaserExtension
+.. autopydantic_model:: picmistandard.PICMI_LaserExtension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_LaserInjectionExtension
+.. autopydantic_model:: picmistandard.PICMI_LaserInjectionExtension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_AppliedFieldExtension
+.. autopydantic_model:: picmistandard.PICMI_AppliedFieldExtension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_DiagnosticExtension
+.. autopydantic_model:: picmistandard.PICMI_DiagnosticExtension
+    :inherited-members: BaseModel
 
-.. autoclass:: picmistandard.PICMI_InteractionExtension
+.. autopydantic_model:: picmistandard.PICMI_InteractionExtension
+    :inherited-members: BaseModel
 
 Classes with analytic expressions, whose parameters are given as additional keyword arguments, derive from ``PICMI_ExpressionParameters``, too.
 
-.. autoclass:: picmistandard.PICMI_ExpressionParameters
+.. autopydantic_model:: picmistandard.PICMI_ExpressionParameters
+    :inherited-members: BaseModel

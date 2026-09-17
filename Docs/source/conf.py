@@ -220,12 +220,22 @@ def setup(app):
     2. Strip the ``:type:`` / ``:value:`` of class attributes whose value is just an
        object repr (e.g. the ``extension`` handle), so they render as a bare name instead
        of ``extension: ClassVar[Any] = <... object>``.
+    3. Name the unions of the PICMI classes of a kind in the types, e.g.,
+       ``PICMI_AnySolver | None`` instead of listing all solver classes.
+
+    Parameters are shown with their user-facing name, i.e., their alias (e.g., a
+    code-specific ``<code>_<name>``) instead of their field name (``<name>``). Also use
+    that name to sort the parameters and in the table of contents.
     """
     import re
+    import types
 
+    import picmistandard
     from sphinxcontrib.autodoc_pydantic.directives.autodocumenters import (
+        PydanticFieldDocumenter,
         PydanticModelDocumenter,
     )
+    from sphinxcontrib.autodoc_pydantic.directives.directives import PydanticField
 
     # Directive emitted for each member type -> rubric label (groupwise order).
     group_labels = [
@@ -236,7 +246,52 @@ def setup(app):
     ]
     object_repr = re.compile(r":value:\s*<.* object.*>")
 
+    def union_members(union):
+        # the classes of a union as written in a type, e.g., ``~module.Class | ~module.Other``
+        return re.compile(
+            r"(?<![\w.~])"
+            + r"\s*\|\s*".join(
+                rf"~?{re.escape(member.__module__)}\.{re.escape(member.__qualname__)}"
+                for member in union.__args__
+            )
+            + r"(?![\w.])"
+        )
+
+    # longest first, in case the classes of one union are part of another one
+    named_unions = sorted(
+        (
+            (union_members(value), name)
+            for name, value in vars(picmistandard).items()
+            if name.startswith("PICMI_Any") and isinstance(value, types.UnionType)
+        ),
+        key=lambda entry: len(entry[0].pattern),
+        reverse=True,
+    )
+
     class GroupedPydanticModelDocumenter(PydanticModelDocumenter):
+        def sort_members(self, documenters, order):
+            documenters = super().sort_members(documenters, order)
+            if (
+                order == "groupwise"
+                and self.config.autodoc_pydantic_field_swap_name_and_alias
+            ):
+                fields = self.object.model_fields
+
+                def user_facing_name(documenter):
+                    name = documenter.name.rsplit(".", 1)[-1]
+                    field = fields.get(name)
+                    if isinstance(documenter, PydanticFieldDocumenter) and field:
+                        return field.alias or name
+                    return name
+
+                documenters.sort(
+                    key=lambda entry: (
+                        entry[0].member_order,
+                        user_facing_name(entry[0]),
+                    )
+                )
+            return documenters
+
         def document_members(self, all_members: bool = False) -> None:
             result = self.directive.result
             start = len(result.data)
@@ -254,7 +309,9 @@ def setup(app):
                             break
                         opts[m.group(1)] = j
                         j += 1
-                    if "value" in opts and object_repr.search(result.data[opts["value"]].strip()):
+                    if "value" in opts and object_repr.search(
+                        result.data[opts["value"]].strip()
+                    ):
                         to_delete += [opts[k] for k in ("type", "value") if k in opts]
                     i = j
                 else:
@@ -279,5 +336,29 @@ def setup(app):
                 result.insert(i, f"{indent}.. rubric:: {label}", src, offset)
                 result.insert(i, "", src, offset)
 
+            # Pass 3: name the unions of PICMI classes in the types.
+            for i in range(start, len(result.data)):
+                if result.data[i].lstrip().startswith(":type:"):
+                    for members, name in named_unions:
+                        result.data[i] = members.sub(name, result.data[i])
+
+    class UserFacingNamePydanticField(PydanticField):
+        def _toc_entry_name(self, sig_node):
+            # autodoc-pydantic swaps the field name with the alias only in the signature
+            entry = super()._toc_entry_name(sig_node)
+            alias = self.options.get("alias")
+            if (
+                entry
+                and alias
+                and self.pyautodoc.get_value("field-swap-name-and-alias")
+            ):
+                name = sig_node["_toc_parts"][-1]
+                if entry.endswith(name):
+                    entry = entry[: -len(name)] + alias
+            return entry
+
     app.setup_extension("sphinxcontrib.autodoc_pydantic")
     app.add_autodocumenter(GroupedPydanticModelDocumenter, override=True)
+    app.add_directive_to_domain(
+        "py", "pydantic_field", UserFacingNamePydanticField, override=True
+    )
