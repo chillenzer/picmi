@@ -17,6 +17,12 @@ Electrostatic
 .. autopydantic_model:: picmistandard.PICMI_ElectrostaticSolver
     :inherited-members: BaseModel
 
+Magnetostatic
+-------------
+
+.. autopydantic_model:: picmistandard.PICMI_MagnetostaticSolver
+    :inherited-members: BaseModel
+
 Smoothing
 ---------
 

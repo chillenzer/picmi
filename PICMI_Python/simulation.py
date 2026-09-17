@@ -112,16 +112,17 @@ class PICMI_Simulation(_PICMIModel):
 
         Parameters
         ----------
-        species: species instance
+        species : PICMI_AnySpecies
             An instance of one of the PICMI species objects.
             Defines species to be added from the *physical* point of view
             (e.g. charge, mass, initial distribution of particles).
 
-        layout: layout instance
-            An instance of one of the PICMI particle layout objects.
-            Defines how particles are added into the simulation, from the *numerical* point of view.
+        layout : PICMI_AnyLayout, list of PICMI_AnyLayout, or None
+            An instance of one of the PICMI particle layout objects (or a list of them, one per
+            initial distribution). Defines how particles are added into the simulation, from the
+            *numerical* point of view.
 
-        initialize_self_field: bool, optional
+        initialize_self_field : bool, optional
             Whether the initial space-charge fields of this species
             is calculated and added to the simulation
         """
@@ -143,23 +144,24 @@ class PICMI_Simulation(_PICMIModel):
 
         Parameters
         ----------
-        species: species instance
+        species : PICMI_AnySpecies
             An instance of one of the PICMI species objects.
             Defines species to be added from the *physical* point of view
             (e.g. charge, mass, initial distribution of particles).
 
-        layout: layout instance
-            An instance of one of the PICMI layout objects.
-            Defines how particles are added into the simulation, from the *numerical* point of view.
+        layout : PICMI_AnyLayout, list of PICMI_AnyLayout, or None
+            An instance of one of the PICMI layout objects (or a list of them, one per initial
+            distribution). Defines how particles are added into the simulation, from the
+            *numerical* point of view.
 
-        initialize_self_field: bool, optional
+        initialize_self_field : bool, optional
             Whether the initial space-charge fields of this species
             is calculated and added to the simulation
 
-        injection_plane_position: vector of floats
+        injection_plane_position : float or list of float
             Position of one point of the injection plane
 
-        injection_plane_normal_vector: vector of floats
+        injection_plane_normal_vector : list of float
             Vector normal to injection plane
         """
         self._append(
@@ -173,16 +175,16 @@ class PICMI_Simulation(_PICMIModel):
 
     def add_laser(self, laser, injection_method):
         """
-        Add a laser pulses that to be injected in the simulation
+        Add a laser pulse that is injected into the simulation
 
         Parameters
         ----------
-        laser_profile: laser instance
-            One of laser profile instances.
+        laser : PICMI_AnyLaser
+            One of the laser profile instances.
             Specifies the **physical** properties of the laser pulse
             (e.g. spatial and temporal profile, wavelength, amplitude, etc.).
 
-        injection_method: laser injection instance, optional
+        injection_method : PICMI_AnyLaserInjection or None
             Specifies how the laser is injected (numerically) into the simulation
             (e.g. through a laser antenna, or directly added to the mesh).
             This argument describes an **algorithm**, not a physical object.
@@ -197,8 +199,8 @@ class PICMI_Simulation(_PICMIModel):
 
         Parameters
         ----------
-        applied_field: applied field instance
-            One of the applied field instance.
+        applied_field : PICMI_AnyAppliedField
+            One of the applied field instances.
             Specifies the properties of the applied field.
         """
         self._append(applied_fields=applied_field)
@@ -209,7 +211,7 @@ class PICMI_Simulation(_PICMIModel):
 
         Parameters
         ----------
-        diagnostic: diagnostic instance
+        diagnostic : PICMI_AnyDiagnostic
             One of the diagnostic instances.
         """
         self._append(diagnostics=diagnostic)
@@ -220,7 +222,7 @@ class PICMI_Simulation(_PICMIModel):
 
         Parameters
         ----------
-        interaction: interaction instance
+        interaction : PICMI_AnyInteraction
             One of the interaction objects.
         """
         self._append(interactions=interaction)
@@ -233,9 +235,9 @@ class PICMI_Simulation(_PICMIModel):
         Note: this is equivalent to passing `max_steps` as an argument,
         when initializing the `Simulation` object
 
-        Parameter
-        ---------
-        max_steps: integer
+        Parameters
+        ----------
+        max_steps : int
             Maximum number of time steps
         """
         self.max_steps = max_steps
@@ -250,7 +252,7 @@ class PICMI_Simulation(_PICMIModel):
 
         Parameters
         ----------
-        file_name: string
+        file_name : str
             The path to the file that will be created
         """
         raise NotImplementedError
@@ -261,7 +263,7 @@ class PICMI_Simulation(_PICMIModel):
 
         Parameters
         ----------
-        nsteps: integer, default=1
+        nsteps : int, default 1
             The number of timesteps
         """
         raise NotImplementedError

@@ -228,7 +228,7 @@ class PICMI_Cartesian1DGrid(_PICMIGrid):
     )
     refined_regions: list = Field(
         default_factory=list,
-        description="List of refined regions, each element being a list of the format [level, lo, hi, refinement_factor], with level being the refinement level, with 1 being the first level of refinement, 2 being the second etc, lo and hi being vectors of length 2 specifying the extent of the region, and refinement_factor defaulting to [2,2] (relative to next lower level)",
+        description="List of refined regions, each element being a list of the format [level, lo, hi, refinement_factor], with level being the refinement level, with 1 being the first level of refinement, 2 being the second etc, lo and hi being vectors of length 1 specifying the extent of the region, and refinement_factor defaulting to [2] (relative to next lower level)",
     )
     lower_bound_particles: list[float] | None = Field(
         default=None, description="Position of particle lower bound [m]"
@@ -331,9 +331,17 @@ class PICMI_Cartesian1DGrid(_PICMIGrid):
 
     def add_refined_region(self, level, lo, hi, refinement_factor=[2]):
         """Add a refined region.
-        level: the refinement level, with 1 being the first level of refinement, 2 being the second etc.
-        lo, hi: vectors of length 2 specifying the extent of the region
-        refinement_factor: defaulting to [2,2] (relative to next lower level)
+
+        Parameters
+        ----------
+        level : int
+            The refinement level, with 1 being the first level of refinement, 2 being the second etc.
+
+        lo, hi : list of float
+            The lower (lo) and upper (hi) corner of the region, each a vector of length 1
+
+        refinement_factor : list of int, default [2]
+            The refinement factor relative to the next lower level
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
@@ -548,9 +556,17 @@ class PICMI_CylindricalGrid(_PICMIGrid):
 
     def add_refined_region(self, level, lo, hi, refinement_factor=[2, 2]):
         """Add a refined region.
-        level: the refinement level, with 1 being the first level of refinement, 2 being the second etc.
-        lo, hi: vectors of length 2 specifying the extent of the region
-        refinement_factor: defaulting to [2,2] (relative to next lower level)
+
+        Parameters
+        ----------
+        level : int
+            The refinement level, with 1 being the first level of refinement, 2 being the second etc.
+
+        lo, hi : list of float
+            The lower (lo) and upper (hi) corner of the region, each a vector of length 2
+
+        refinement_factor : list of int, default [2, 2]
+            The refinement factor relative to the next lower level
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
@@ -760,9 +776,17 @@ class PICMI_Cartesian2DGrid(_PICMIGrid):
 
     def add_refined_region(self, level, lo, hi, refinement_factor=[2, 2]):
         """Add a refined region.
-        level: the refinement level, with 1 being the first level of refinement, 2 being the second etc.
-        lo, hi: vectors of length 2 specifying the extent of the region
-        refinement_factor: defaulting to [2,2] (relative to next lower level)
+
+        Parameters
+        ----------
+        level : int
+            The refinement level, with 1 being the first level of refinement, 2 being the second etc.
+
+        lo, hi : list of float
+            The lower (lo) and upper (hi) corner of the region, each a vector of length 2
+
+        refinement_factor : list of int, default [2, 2]
+            The refinement factor relative to the next lower level
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
@@ -1017,14 +1041,14 @@ class PICMI_Cartesian3DGrid(_PICMIGrid):
 
         Parameters
         ----------
-        level: integer
+        level : int
             The refinement level, with 1 being the first level of refinement, 2 being the second etc.
 
-        lo, hi: vectors of floats
-            Each is a vector of length 3 specifying the extent of the region
+        lo, hi : list of float
+            The lower (lo) and upper (hi) corner of the region, each a vector of length 3
 
-        refinement_factor: vector of integers, optional
-            Defaulting to [2,2,2] (relative to next lower level)
+        refinement_factor : list of int, default [2, 2, 2]
+            The refinement factor relative to the next lower level
         """
         # assign (instead of appending in place), so that the region is validated and marked as set
         self.refined_regions = [*self.refined_regions, [level, lo, hi, refinement_factor]]
