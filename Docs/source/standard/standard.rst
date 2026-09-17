@@ -50,8 +50,8 @@ Extensions
 
    extensions
 
-Types
------
+Type Aliases
+------------
 
 .. toctree::
    :maxdepth: 1

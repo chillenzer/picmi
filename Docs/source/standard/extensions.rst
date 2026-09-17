@@ -3,6 +3,7 @@ Code-specific extensions
 
 Implementing codes can provide classes that have no counterpart in the standard, e.g., additional field solvers or diagnostics.
 They derive these classes from the extension class of the respective kind, so that the objects are accepted by the PICMI classes where objects of that kind are expected.
+Each extension class is part of the type alias of its kind (see :doc:`types`), e.g., :py:class:`~picmistandard.PICMI_SolverExtension` in :py:data:`~picmistandard.PICMI_AnySolver`.
 Classes that are only used by other code-specific classes derive from ``PICMI_Extension`` directly.
 
 .. autopydantic_model:: picmistandard.PICMI_Extension

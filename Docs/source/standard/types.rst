@@ -1,5 +1,5 @@
-Types
-=====
+Type Aliases
+============
 
 Parameters that take an object of a kind, e.g., a field solver, accept any of the PICMI classes of this kind.
 This includes the classes that implementing codes derive from the extension class of the kind (see :doc:`extensions`).
